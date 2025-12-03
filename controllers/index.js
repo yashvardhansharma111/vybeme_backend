@@ -16,6 +16,7 @@ const mapController = require('./mapController');
 const contactController = require('./contactController');
 const reportController = require('./reportController');
 const savedPostController = require('./savedPostController');
+const uploadController = require('./uploadController');
 
 module.exports = {
   userController,
@@ -35,6 +36,7 @@ module.exports = {
   mapController,
   contactController,
   reportController,
-  savedPostController
+  savedPostController,
+  uploadController
 };
 

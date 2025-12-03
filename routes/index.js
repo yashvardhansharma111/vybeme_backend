@@ -17,9 +17,11 @@ const mapRoutes = require('./mapRoutes');
 const contactRoutes = require('./contactRoutes');
 const reportRoutes = require('./reportRoutes');
 const savedPostRoutes = require('./savedPostRoutes');
+const uploadRoutes = require('./uploadRoutes');
 
 // API routes
 router.use('/auth', authRoutes);
+router.use('/upload', uploadRoutes);
 router.use('/user', userRoutes);
 router.use('/tags', categoryRoutes);
 router.use('/feed', feedRoutes);
