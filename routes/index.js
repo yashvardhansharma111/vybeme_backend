@@ -1,13 +1,42 @@
 const express = require('express');
 const router = express.Router();
-const userRoutes = require('./userRoutes');
-const planRoutes = require('./planRoutes');
 const authRoutes = require('./authRoutes');
+const userRoutes = require('./userRoutes');
+const categoryRoutes = require('./categoryRoutes');
+const feedRoutes = require('./feedRoutes');
+const postRoutes = require('./postRoutes');
+const businessPostRoutes = require('./businessPostRoutes');
+const repostRoutes = require('./repostRoutes');
+const interactionRoutes = require('./interactionRoutes');
+const chatRoutes = require('./chatRoutes');
+const inviteRoutes = require('./inviteRoutes');
+const notificationRoutes = require('./notificationRoutes');
+const weeklyRoutes = require('./weeklyRoutes');
+const eventPollRoutes = require('./eventPollRoutes');
+const mapRoutes = require('./mapRoutes');
+const contactRoutes = require('./contactRoutes');
+const reportRoutes = require('./reportRoutes');
+const savedPostRoutes = require('./savedPostRoutes');
 
 // API routes
 router.use('/auth', authRoutes);
-router.use('/users', userRoutes);
-router.use('/plans', planRoutes);
+router.use('/user', userRoutes);
+router.use('/tags', categoryRoutes);
+router.use('/feed', feedRoutes);
+router.use('/post', postRoutes);
+router.use('/business', businessPostRoutes);
+router.use('/repost', repostRoutes);
+// Interaction routes (comments, reactions, join) - using /post prefix
+router.use('/post', interactionRoutes);
+router.use('/chat', chatRoutes);
+router.use('/invite', inviteRoutes);
+router.use('/notifications', notificationRoutes);
+router.use('/weekly', weeklyRoutes);
+router.use('/event-poll', eventPollRoutes);
+router.use('/map', mapRoutes);
+router.use('/contacts', contactRoutes);
+router.use('/user', reportRoutes);
+router.use('/post', savedPostRoutes);
 
 // Health check
 router.get('/health', (req, res) => {

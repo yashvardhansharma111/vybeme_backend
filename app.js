@@ -1,14 +1,29 @@
 const express = require('express');
+const http = require('http');
+const { Server } = require('socket.io');
 const cors = require('cors');
 const connectDB = require('./config/database');
 const routes = require('./routes');
 const { sendError } = require('./utils');
+const initializeSocket = require('./socket/socketHandler');
 
 // Load environment variables
 require('dotenv').config();
 
 // Initialize Express app
 const app = express();
+const server = http.createServer(app);
+
+// Initialize Socket.io
+const io = new Server(server, {
+  cors: {
+    origin: '*',
+    methods: ['GET', 'POST']
+  }
+});
+
+// Initialize socket handlers
+initializeSocket(io);
 
 // Connect to MongoDB
 connectDB();
@@ -35,8 +50,12 @@ app.get('/', (req, res) => {
     endpoints: {
       health: '/api/health',
       auth: '/api/auth',
-      users: '/api/users',
-      plans: '/api/plans'
+      users: '/api/user',
+      tags: '/api/tags',
+      feed: '/api/feed',
+      posts: '/api/post',
+      chat: '/api/chat',
+      notifications: '/api/notifications'
     }
   });
 });
@@ -60,10 +79,11 @@ app.use((err, req, res, next) => {
 // Start server
 const PORT = process.env.PORT || 3000;
 
-app.listen(PORT, () => {
+server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  console.log(`Socket.io server initialized`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
-module.exports = app;
+module.exports = { app, server, io };
 
