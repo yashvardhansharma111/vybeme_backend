@@ -5,7 +5,9 @@ const JWT_SECRET = process.env.JWT_SECRET || config.JWT_SECRET || 'your-secret-k
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'your-refresh-secret-key-change-in-production';
 
 const generateAccessToken = (payload) => {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: '15m' });
+  // In development, use 7 days. In production, use shorter duration (15m)
+  const expiresIn = process.env.NODE_ENV === 'production' ? '15m' : '7d';
+  return jwt.sign(payload, JWT_SECRET, { expiresIn });
 };
 
 const generateRefreshToken = (payload) => {
