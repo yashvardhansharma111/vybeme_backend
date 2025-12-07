@@ -46,8 +46,12 @@ const userReportSchema = new mongoose.Schema({
 });
 
 userReportSchema.pre('save', function(next) {
-  this.updated_at = Date.now();
-  next();
+  if (this.isModified() || this.isNew) {
+    this.updated_at = Date.now();
+  }
+  if (typeof next === 'function') {
+    next();
+  }
 });
 
 userReportSchema.index({ reported_user_id: 1 });

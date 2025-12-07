@@ -63,7 +63,7 @@ Create a `.env` file in the root directory:
 
 ```env
 MONGO_URI=mongodb+srv://yashvardhan:yashvardhan@vybeme.gjmypef.mongodb.net/?appName=vybeme
-PORT=3000
+PORT=8000
 NODE_ENV=development
 ```
 

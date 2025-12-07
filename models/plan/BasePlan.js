@@ -188,11 +188,15 @@ const basePlanSchema = new mongoose.Schema({
 });
 
 basePlanSchema.pre('save', function(next) {
-  this.updated_at = Date.now();
+  if (this.isModified() || this.isNew) {
+    this.updated_at = Date.now();
+  }
   if (this.isNew && this.post_status === 'published') {
     this.posted_at = Date.now();
   }
-  next();
+  if (typeof next === 'function') {
+    next();
+  }
 });
 
 module.exports = mongoose.model('BasePlan', basePlanSchema);

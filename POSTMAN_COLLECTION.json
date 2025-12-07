@@ -1,0 +1,415 @@
+{
+  "info": {
+    "name": "Vybeme Backend API",
+    "description": "Complete API collection for Vybeme backend",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000/api",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "session_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "type": "string"
+    }
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {
+        "key": "token",
+        "value": "{{access_token}}",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "1. Authentication",
+      "item": [
+        {
+          "name": "Send OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone_number\": \"+1234567890\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/send-otp",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "send-otp"]
+            }
+          }
+        },
+        {
+          "name": "Verify OTP",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "    const jsonData = pm.response.json();",
+                  "    if (jsonData.data) {",
+                  "        pm.collectionVariables.set(\"access_token\", jsonData.data.access_token);",
+                  "        pm.collectionVariables.set(\"session_id\", jsonData.data.session_id);",
+                  "        pm.collectionVariables.set(\"user_id\", jsonData.data.user_id);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone_number\": \"+1234567890\",\n  \"otp_code\": \"123456\",\n  \"otp_id\": \"otp_xxxxx\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/verify-otp",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "verify-otp"]
+            }
+          }
+        },
+        {
+          "name": "Resend OTP",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone_number\": \"+1234567890\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/resend-otp",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "resend-otp"]
+            }
+          }
+        },
+        {
+          "name": "Get Session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/auth/session?session_id={{session_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "session"],
+              "query": [
+                {
+                  "key": "session_id",
+                  "value": "{{session_id}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Refresh Token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"refresh_token\": \"your_refresh_token_here\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/auth/refresh-token",
+              "host": ["{{base_url}}"],
+              "path": ["auth", "refresh-token"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "2. User Profile",
+      "item": [
+        {
+          "name": "Get Current User",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/user/me?session_id={{session_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["user", "me"],
+              "query": [
+                {
+                  "key": "session_id",
+                  "value": "{{session_id}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get User Profile",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/user/profile/:user_id",
+              "host": ["{{base_url}}"],
+              "path": ["user", "profile", ":user_id"],
+              "variable": [
+                {
+                  "key": "user_id",
+                  "value": "{{user_id}}"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Profile",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"session_id\": \"{{session_id}}\",\n  \"name\": \"John Doe\",\n  \"bio\": \"I love traveling!\",\n  \"gender\": \"male\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/user/update",
+              "host": ["{{base_url}}"],
+              "path": ["user", "update"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "3. Posts",
+      "item": [
+        {
+          "name": "Create Post (JSON)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"title\": \"My First Plan\",\n  \"description\": \"Let's meet at Central Park!\",\n  \"category_main\": \"sports\",\n  \"category_sub\": [\"football\"],\n  \"location_text\": \"Central Park, NYC\",\n  \"date\": \"2024-01-15\",\n  \"time\": \"14:00\",\n  \"num_people\": 10\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/post/create",
+              "host": ["{{base_url}}"],
+              "path": ["post", "create"]
+            }
+          }
+        },
+        {
+          "name": "Create Post (Form Data with Files)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "user_id",
+                  "value": "{{user_id}}",
+                  "type": "text"
+                },
+                {
+                  "key": "title",
+                  "value": "My Plan with Images",
+                  "type": "text"
+                },
+                {
+                  "key": "description",
+                  "value": "This plan has images!",
+                  "type": "text"
+                },
+                {
+                  "key": "category_main",
+                  "value": "sports",
+                  "type": "text"
+                },
+                {
+                  "key": "files",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/post/create",
+              "host": ["{{base_url}}"],
+              "path": ["post", "create"]
+            }
+          }
+        },
+        {
+          "name": "Get Post Details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/feed/post/:post_id",
+              "host": ["{{base_url}}"],
+              "path": ["feed", "post", ":post_id"],
+              "variable": [
+                {
+                  "key": "post_id",
+                  "value": "plan_xxxxx"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "4. Uploads",
+      "item": [
+        {
+          "name": "Upload Single Image",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/upload/image",
+              "host": ["{{base_url}}"],
+              "path": ["upload", "image"]
+            }
+          }
+        },
+        {
+          "name": "Upload Multiple Images",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "files",
+                  "type": "file",
+                  "src": []
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{base_url}}/upload/images",
+              "host": ["{{base_url}}"],
+              "path": ["upload", "images"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "5. Interactions",
+      "item": [
+        {
+          "name": "Add Comment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"post_id\": \"plan_xxxxx\",\n  \"user_id\": \"{{user_id}}\",\n  \"text\": \"This looks great!\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/post/comment",
+              "host": ["{{base_url}}"],
+              "path": ["post", "comment"]
+            }
+          }
+        },
+        {
+          "name": "Add Reaction",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"post_id\": \"plan_xxxxx\",\n  \"user_id\": \"{{user_id}}\",\n  \"emoji_type\": \"👍\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/post/react",
+              "host": ["{{base_url}}"],
+              "path": ["post", "react"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
+

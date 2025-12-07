@@ -51,19 +51,77 @@ const upload = multer({
   fileFilter: fileFilter
 });
 
-// Middleware for single file upload
-const uploadSingle = (fieldName = 'file') => {
-  return upload.single(fieldName);
+// Error handling wrapper for multer
+const handleMulterError = (err, req, res, next) => {
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({
+        success: false,
+        message: 'File too large. Maximum size is 50MB'
+      });
+    }
+    if (err.code === 'LIMIT_FILE_COUNT') {
+      return res.status(400).json({
+        success: false,
+        message: 'Too many files. Maximum is 10 files'
+      });
+    }
+    return res.status(400).json({
+      success: false,
+      message: err.message
+    });
+  }
+  if (err) {
+    return res.status(400).json({
+      success: false,
+      message: err.message || 'File upload error'
+    });
+  }
+  next();
 };
 
-// Middleware for multiple files upload
+// Middleware for single file upload (optional - allows requests without files)
+const uploadSingle = (fieldName = 'file') => {
+  return (req, res, next) => {
+    const middleware = upload.single(fieldName);
+    middleware(req, res, (err) => {
+      if (err) {
+        return handleMulterError(err, req, res, next);
+      }
+      // If no file uploaded, that's okay - continue
+      next();
+    });
+  };
+};
+
+// Middleware for multiple files upload (optional - allows requests without files)
 const uploadMultiple = (fieldName = 'files', maxCount = 10) => {
-  return upload.array(fieldName, maxCount);
+  return (req, res, next) => {
+    const middleware = upload.array(fieldName, maxCount);
+    middleware(req, res, (err) => {
+      if (err) {
+        return handleMulterError(err, req, res, next);
+      }
+      // If no files uploaded, that's okay - continue
+      // req.files will be undefined or empty array
+      if (!req.files) {
+        req.files = [];
+      }
+      next();
+    });
+  };
 };
 
 // Middleware for multiple fields
 const uploadFields = (fields) => {
-  return upload.fields(fields);
+  return (req, res, next) => {
+    upload.fields(fields)(req, res, (err) => {
+      if (err) {
+        return handleMulterError(err, req, res, next);
+      }
+      next();
+    });
+  };
 };
 
 // Clean up uploaded file after processing

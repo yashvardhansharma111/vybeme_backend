@@ -10,10 +10,15 @@ exports.syncContacts = async (req, res) => {
     
     // Hash phone numbers and find matches
     const hashedContacts = await Promise.all(
-      contacts.map(async (contact) => ({
-        name: contact.name,
-        phone_hashed: await hashString(contact.phone)
-      }))
+      contacts.map(async (contact) => {
+        if (!contact.phone) {
+          throw new Error('Phone number is required for contact');
+        }
+        return {
+          name: contact.name || '',
+          phone_hashed: await hashString(contact.phone)
+        };
+      })
     );
     
     // Find matched users (simplified - in production, you'd hash all user phones and match)

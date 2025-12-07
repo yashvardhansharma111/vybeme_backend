@@ -1,11 +1,12 @@
 const { AuthOTP, User, UserSession } = require('../models');
 const { sendSuccess, sendError, generateId, generateOTP, hashString, validatePhoneNumber } = require('../utils');
 const { generateAccessToken, generateRefreshToken } = require('../utils/jwt');
+const { storeOTP, getOTP, markOTPAsUsed, incrementAttemptCount } = require('../utils/otpCache');
 
 /**
  * Send OTP
  */
-exports.sendOTP = async (req, res) => {
+exports.sendOTP = async (req, res, next) => {
   try {
     const { phone_number } = req.body;
     
@@ -15,22 +16,36 @@ exports.sendOTP = async (req, res) => {
     
     const otp = generateOTP(6);
     const otpHash = await hashString(otp);
+    const otp_id = generateId('otp');
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
     
-    const authOTP = await AuthOTP.create({
-      otp_id: generateId('otp'),
-      phone_number,
-      otp_hash: otpHash,
-      expires_at: expiresAt,
-      attempt_count: 0,
-      used: false
-    });
+    // Store OTP in node-cache with TTL (10 minutes = 600 seconds)
+    const stored = storeOTP(otp_id, phone_number, otpHash, 600);
+    
+    if (!stored) {
+      return sendError(res, 'Failed to store OTP', 500);
+    }
+    
+    // Also store in MongoDB for audit/logging (optional)
+    try {
+      await AuthOTP.create({
+        otp_id,
+        phone_number,
+        otp_hash: otpHash,
+        expires_at: expiresAt,
+        attempt_count: 0,
+        used: false
+      });
+    } catch (dbError) {
+      // Log but don't fail - cache is primary storage
+      console.warn('Failed to store OTP in database:', dbError.message);
+    }
     
     // In production, send OTP via SMS service
     console.log(`OTP for ${phone_number}: ${otp}`);
     
     return sendSuccess(res, 'OTP sent successfully', {
-      otp_id: authOTP.otp_id,
+      otp_id: otp_id,
       expires_at: expiresAt
     });
   } catch (error) {
@@ -41,39 +56,93 @@ exports.sendOTP = async (req, res) => {
 /**
  * Verify OTP
  */
-exports.verifyOTP = async (req, res) => {
+exports.verifyOTP = async (req, res, next) => {
   try {
-    const { otp_id, otp, phone_number } = req.body;
+    const { otp_id, otp, otp_code, phone_number } = req.body;
     
-    const authOTP = await AuthOTP.findOne({ otp_id, phone_number });
+    // Support both 'otp' and 'otp_code' field names
+    const otpValue = otp || otp_code;
     
-    if (!authOTP) {
-      return sendError(res, 'Invalid OTP ID', 400);
+    if (!otpValue) {
+      return sendError(res, 'OTP code is required', 400);
     }
     
+    if (!otp_id) {
+      return sendError(res, 'OTP ID is required', 400);
+    }
+    
+    if (!phone_number) {
+      return sendError(res, 'Phone number is required', 400);
+    }
+    
+    // Get OTP from node-cache (primary storage)
+    let authOTP = getOTP(otp_id, phone_number);
+    
+    if (!authOTP) {
+      // If not in cache, check MongoDB (for backward compatibility)
+      const dbOTP = await AuthOTP.findOne({ otp_id, phone_number });
+      if (!dbOTP) {
+        return sendError(res, 'Invalid OTP ID or phone number', 400);
+      }
+      
+      // Check if expired
+      if (new Date() > dbOTP.expires_at) {
+        return sendError(res, 'OTP expired', 400);
+      }
+      
+      // Convert to cache format
+      authOTP = {
+        otp_id: dbOTP.otp_id,
+        phone_number: dbOTP.phone_number,
+        otp_hash: dbOTP.otp_hash,
+        attempt_count: dbOTP.attempt_count,
+        used: dbOTP.used,
+        created_at: dbOTP.created_at
+      };
+    }
+    
+    // Check if already used
     if (authOTP.used) {
       return sendError(res, 'OTP already used', 400);
     }
     
-    if (new Date() > authOTP.expires_at) {
-      return sendError(res, 'OTP expired', 400);
-    }
-    
+    // Check attempt count
     if (authOTP.attempt_count >= 5) {
       return sendError(res, 'Too many attempts', 429);
     }
     
-    const otpHash = await hashString(otp);
+    // Verify OTP
+    const otpHash = await hashString(otpValue);
     
     if (otpHash !== authOTP.otp_hash) {
-      authOTP.attempt_count += 1;
-      await authOTP.save();
+      // Increment attempt count in cache
+      incrementAttemptCount(otp_id, phone_number);
+      
+      // Also update in database
+      try {
+        await AuthOTP.updateOne(
+          { otp_id, phone_number },
+          { $inc: { attempt_count: 1 } }
+        );
+      } catch (dbError) {
+        console.warn('Failed to update attempt count in database:', dbError.message);
+      }
+      
       return sendError(res, 'Invalid OTP', 400);
     }
     
-    // Mark OTP as used
-    authOTP.used = true;
-    await authOTP.save();
+    // Mark OTP as used in cache
+    markOTPAsUsed(otp_id, phone_number);
+    
+    // Also mark as used in database
+    try {
+      await AuthOTP.updateOne(
+        { otp_id, phone_number },
+        { $set: { used: true } }
+      );
+    } catch (dbError) {
+      console.warn('Failed to update OTP in database:', dbError.message);
+    }
     
     // Find or create user
     let isNewUser = false;
@@ -115,14 +184,18 @@ exports.verifyOTP = async (req, res) => {
       refresh_token: refreshToken
     });
   } catch (error) {
-    return sendError(res, error.message, 500);
+    console.error('Verify OTP Error:', error);
+    console.error('Error Stack:', error.stack);
+    if (!res.headersSent) {
+      return sendError(res, error.message || 'Internal server error', 500);
+    }
   }
 };
 
 /**
  * Resend OTP
  */
-exports.resendOTP = async (req, res) => {
+exports.resendOTP = async (req, res, next) => {
   try {
     const { phone_number } = req.body;
     
@@ -132,21 +205,34 @@ exports.resendOTP = async (req, res) => {
     
     const otp = generateOTP(6);
     const otpHash = await hashString(otp);
+    const otp_id = generateId('otp');
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
     
-    const authOTP = await AuthOTP.create({
-      otp_id: generateId('otp'),
-      phone_number,
-      otp_hash: otpHash,
-      expires_at: expiresAt,
-      attempt_count: 0,
-      used: false
-    });
+    // Store OTP in node-cache with TTL
+    const stored = storeOTP(otp_id, phone_number, otpHash, 600);
+    
+    if (!stored) {
+      return sendError(res, 'Failed to store OTP', 500);
+    }
+    
+    // Also store in MongoDB for audit
+    try {
+      await AuthOTP.create({
+        otp_id,
+        phone_number,
+        otp_hash: otpHash,
+        expires_at: expiresAt,
+        attempt_count: 0,
+        used: false
+      });
+    } catch (dbError) {
+      console.warn('Failed to store OTP in database:', dbError.message);
+    }
     
     console.log(`Resent OTP for ${phone_number}: ${otp}`);
     
     return sendSuccess(res, 'OTP resent successfully', {
-      otp_id: authOTP.otp_id
+      otp_id: otp_id
     });
   } catch (error) {
     return sendError(res, error.message, 500);
@@ -156,7 +242,7 @@ exports.resendOTP = async (req, res) => {
 /**
  * Get session
  */
-exports.getSession = async (req, res) => {
+exports.getSession = async (req, res, next) => {
   try {
     const { session_id } = req.query;
     
@@ -183,7 +269,7 @@ exports.getSession = async (req, res) => {
 /**
  * Logout
  */
-exports.logout = async (req, res) => {
+exports.logout = async (req, res, next) => {
   try {
     const { session_id } = req.body;
     
@@ -198,7 +284,7 @@ exports.logout = async (req, res) => {
 /**
  * Refresh token
  */
-exports.refreshToken = async (req, res) => {
+exports.refreshToken = async (req, res, next) => {
   try {
     const { refresh_token } = req.body;
     const { verifyRefreshToken, generateAccessToken } = require('../utils/jwt');

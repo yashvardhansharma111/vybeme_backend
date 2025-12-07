@@ -2,7 +2,7 @@
 
 ## Base URL
 ```
-http://localhost:3000/api
+http://localhost:8000/api
 ```
 
 ## Authentication
@@ -439,7 +439,7 @@ Authorization: Bearer <access_token>
 
 Connect with authentication token:
 ```javascript
-const socket = io('http://localhost:3000', {
+const socket = io('http://localhost:8000', {
   auth: {
     token: 'your_access_token'
   }

@@ -13,7 +13,9 @@ const generateOTP = (length = 6) => {
 };
 
 const hashString = async (str) => {
-  // This is a placeholder - use bcrypt or crypto in production
+  if (!str || typeof str !== 'string') {
+    throw new Error('hashString: Input must be a non-empty string');
+  }
   const crypto = require('crypto');
   return crypto.createHash('sha256').update(str).digest('hex');
 };

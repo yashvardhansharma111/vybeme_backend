@@ -64,8 +64,12 @@ const contactSyncSchema = new mongoose.Schema({
 });
 
 contactSyncSchema.pre('save', function(next) {
-  this.updated_at = Date.now();
-  next();
+  if (this.isModified() || this.isNew) {
+    this.updated_at = Date.now();
+  }
+  if (typeof next === 'function') {
+    next();
+  }
 });
 
 contactSyncSchema.index({ user_id: 1 });
