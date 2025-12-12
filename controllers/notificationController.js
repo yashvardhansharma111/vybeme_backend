@@ -1,17 +1,77 @@
-const { Notification } = require('../models');
+const { Notification, BasePlan, User, PlanInteraction } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
 
 /**
- * Get notifications list
+ * Get notifications list grouped by post
  */
 exports.getNotifications = async (req, res) => {
   try {
     const { user_id } = req.query;
     const notifications = await Notification.find({ user_id })
       .sort({ created_at: -1 })
-      .limit(50);
+      .limit(100);
     
-    return sendSuccess(res, 'Notifications retrieved successfully', notifications);
+    // Group notifications by post_id
+    const grouped = {};
+    for (const notif of notifications) {
+      const key = notif.source_plan_id || 'no-post';
+      if (!grouped[key]) {
+        grouped[key] = {
+          post_id: notif.source_plan_id,
+          post: null,
+          interactions: [],
+          created_at: notif.created_at
+        };
+      }
+      grouped[key].interactions.push(notif);
+    }
+    
+    // Fetch post and user details
+    const result = [];
+    for (const key in grouped) {
+      const group = grouped[key];
+      if (group.post_id) {
+        const post = await BasePlan.findOne({ plan_id: group.post_id });
+        if (post) {
+          group.post = {
+            plan_id: post.plan_id,
+            title: post.title,
+            description: post.description,
+            media: post.media || []
+          };
+        }
+      }
+      
+      // Fetch user details and interaction status for each interaction
+      for (const interaction of group.interactions) {
+        const user = await User.findOne({ user_id: interaction.source_user_id });
+        if (user) {
+          interaction.user = {
+            user_id: user.user_id,
+            name: user.name,
+            profile_image: user.profile_image
+          };
+        }
+        
+        // Get interaction status from PlanInteraction
+        if (interaction.payload?.request_id) {
+          const planInteraction = await PlanInteraction.findOne({ 
+            interaction_id: interaction.payload.request_id 
+          });
+          if (planInteraction) {
+            interaction.payload.status = planInteraction.status;
+            interaction.payload.approved = planInteraction.status === 'approved';
+          }
+        }
+      }
+      
+      result.push(group);
+    }
+    
+    // Sort by most recent interaction
+    result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    
+    return sendSuccess(res, 'Notifications retrieved successfully', result);
   } catch (error) {
     return sendError(res, error.message, 500);
   }

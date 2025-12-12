@@ -5,6 +5,7 @@ const { authenticate } = require('../middleware/auth');
 
 // Group routes
 router.post('/group/create', authenticate, chatController.createGroup);
+router.post('/individual/create', authenticate, chatController.createIndividualChat);
 router.get('/group/details/:group_id', authenticate, chatController.getGroupDetails);
 router.post('/group/add-members', authenticate, chatController.addMembers);
 router.post('/group/remove-member', authenticate, chatController.removeMember);
@@ -19,6 +20,17 @@ router.delete('/message/delete/:message_id', authenticate, chatController.delete
 router.post('/poll/create', authenticate, chatController.createPoll);
 router.post('/poll/vote', authenticate, chatController.votePoll);
 router.get('/poll/results/:poll_id', authenticate, chatController.getPollResults);
+
+// Chat lists
+router.get('/lists', authenticate, chatController.getChatLists);
+
+// Reactions
+router.post('/message/reaction', authenticate, chatController.addReaction);
+router.delete('/message/reaction', authenticate, chatController.removeReaction);
+
+// Group management
+router.post('/group/close', authenticate, chatController.closeGroup);
+router.post('/group/reopen', authenticate, chatController.reopenGroup);
 
 module.exports = router;
 

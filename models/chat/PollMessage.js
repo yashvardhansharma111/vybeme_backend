@@ -1,5 +1,20 @@
 const mongoose = require('mongoose');
 
+const pollVoteSchema = new mongoose.Schema({
+  user_id: {
+    type: String,
+    required: true
+  },
+  option_id: {
+    type: String,
+    required: true
+  },
+  created_at: {
+    type: Date,
+    default: Date.now
+  }
+}, { _id: false });
+
 const pollOptionSchema = new mongoose.Schema({
   option_id: {
     type: String,
@@ -28,6 +43,10 @@ const pollMessageSchema = new mongoose.Schema({
   options: {
     type: [pollOptionSchema],
     required: true
+  },
+  votes: {
+    type: [pollVoteSchema],
+    default: []
   },
   created_at: {
     type: Date,

@@ -22,6 +22,22 @@ const chatGroupSchema = new mongoose.Schema({
     type: [String],
     default: []
   },
+  group_name: {
+    type: String,
+    default: null
+  },
+  is_closed: {
+    type: Boolean,
+    default: false
+  },
+  closed_by: {
+    type: String,
+    default: null
+  },
+  closed_at: {
+    type: Date,
+    default: null
+  },
   created_at: {
     type: Date,
     default: Date.now

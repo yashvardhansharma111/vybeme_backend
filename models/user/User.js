@@ -36,6 +36,11 @@ const userSchema = new mongoose.Schema({
     type: [String],
     default: []
   },
+  social_media: {
+    instagram: { type: String, default: null },
+    twitter: { type: String, default: null },
+    facebook: { type: String, default: null },
+  },
   is_business: {
     type: Boolean,
     default: false

@@ -1,4 +1,4 @@
-const { Repost, BasePlan } = require('../models');
+const { Repost, BasePlan, Notification } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
 
 /**
@@ -27,6 +27,20 @@ exports.createRepost = async (req, res) => {
       { plan_id: original_post_id },
       { $inc: { reposts_count: 1 } }
     );
+    
+    // Create notification for original post author
+    const originalPlan = await BasePlan.findOne({ plan_id: original_post_id });
+    if (originalPlan && originalPlan.user_id !== repost_author_id) {
+      await Notification.create({
+        notification_id: generateId('notification'),
+        user_id: originalPlan.user_id, // Notify the original post author
+        type: 'repost',
+        source_plan_id: original_post_id,
+        source_user_id: repost_author_id,
+        payload: { repost_id: repost.repost_id, added_content },
+        is_read: false
+      });
+    }
     
     return sendSuccess(res, 'Repost created successfully', { repost_id: repost.repost_id }, 201);
   } catch (error) {

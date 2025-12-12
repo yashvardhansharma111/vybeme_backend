@@ -6,17 +6,67 @@ const { sendSuccess, sendError, generateId } = require('../utils');
  */
 exports.createGroup = async (req, res) => {
   try {
-    const { post_id, created_by, member_ids = [] } = req.body;
+    const { post_id, created_by, member_ids = [], group_name } = req.body;
+    
+    // Check if this is an individual chat (2 members) and if it already exists
+    if (member_ids.length === 1) {
+      const existingChat = await ChatGroup.findOne({
+        plan_id: post_id,
+        members: { $all: [created_by, ...member_ids], $size: 2 }
+      });
+      
+      if (existingChat) {
+        return sendSuccess(res, 'Individual chat already exists', { group_id: existingChat.group_id });
+      }
+    }
     
     const group = await ChatGroup.create({
       group_id: generateId('group'),
       plan_id: post_id,
       created_by,
       members: [created_by, ...member_ids],
-      is_announcement_group: false
+      is_announcement_group: false,
+      group_name: group_name || null
     });
     
     return sendSuccess(res, 'Chat group created successfully', { group_id: group.group_id }, 201);
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Create individual chat (1-on-1)
+ */
+exports.createIndividualChat = async (req, res) => {
+  try {
+    const { post_id, user_id, other_user_id } = req.body;
+    
+    if (!post_id || !user_id || !other_user_id) {
+      return sendError(res, 'post_id, user_id, and other_user_id are required', 400);
+    }
+    
+    // Check if individual chat already exists
+    const existingChat = await ChatGroup.findOne({
+      plan_id: post_id,
+      members: { $all: [user_id, other_user_id], $size: 2 }
+    });
+    
+    if (existingChat) {
+      return sendSuccess(res, 'Individual chat already exists', { group_id: existingChat.group_id });
+    }
+    
+    // Create individual chat (2 members = 1-on-1)
+    const group = await ChatGroup.create({
+      group_id: generateId('group'),
+      plan_id: post_id,
+      created_by: user_id,
+      members: [user_id, other_user_id],
+      is_announcement_group: false,
+      group_name: null // Individual chats don't have names
+    });
+    
+    return sendSuccess(res, 'Individual chat created successfully', { group_id: group.group_id }, 201);
   } catch (error) {
     return sendError(res, error.message, 500);
   }
@@ -28,13 +78,40 @@ exports.createGroup = async (req, res) => {
 exports.getGroupDetails = async (req, res) => {
   try {
     const { group_id } = req.params;
-    const group = await ChatGroup.findOne({ group_id });
+    const { User } = require('../models');
+    const { BasePlan } = require('../models');
+    
+    const group = await ChatGroup.findOne({ group_id }).lean();
     
     if (!group) {
       return sendError(res, 'Group not found', 404);
     }
     
-    return sendSuccess(res, 'Group details retrieved successfully', group);
+    // Get plan details
+    const plan = await BasePlan.findOne({ plan_id: group.plan_id }).lean();
+    
+    // Get member details
+    const members = await Promise.all(
+      group.members.map(async (memberId) => {
+        const user = await User.findOne({ user_id: memberId }).lean();
+        return user ? {
+          user_id: user.user_id,
+          name: user.name,
+          profile_image: user.profile_image
+        } : null;
+      })
+    );
+    
+    return sendSuccess(res, 'Group details retrieved successfully', {
+      ...group,
+      plan: plan ? {
+        plan_id: plan.plan_id,
+        title: plan.title,
+        description: plan.description,
+        media: plan.media || []
+      } : null,
+      members: members.filter(m => m !== null)
+    });
   } catch (error) {
     return sendError(res, error.message, 500);
   }
@@ -142,11 +219,46 @@ exports.sendMessage = async (req, res) => {
 exports.getMessages = async (req, res) => {
   try {
     const { group_id } = req.params;
-    const messages = await ChatMessage.find({ group_id })
-      .sort({ timestamp: -1 })
-      .limit(50);
+    const { User } = require('../models');
+    const { BasePlan } = require('../models');
+    const { PollMessage } = require('../models');
     
-    return sendSuccess(res, 'Messages retrieved successfully', messages.reverse());
+    const messages = await ChatMessage.find({ group_id })
+      .sort({ timestamp: 1 })
+      .limit(100)
+      .lean();
+    
+    // Enrich messages with user info and poll data
+    const enrichedMessages = await Promise.all(
+      messages.map(async (msg) => {
+        const user = await User.findOne({ user_id: msg.user_id }).lean();
+        let pollData = null;
+        
+        if (msg.type === 'poll' && msg.content?.poll_id) {
+          const poll = await PollMessage.findOne({ poll_id: msg.content.poll_id }).lean();
+          if (poll) {
+            pollData = {
+              poll_id: poll.poll_id,
+              question: poll.question,
+              options: poll.options,
+              votes: poll.votes || []
+            };
+          }
+        }
+        
+        return {
+          ...msg,
+          user: user ? {
+            user_id: user.user_id,
+            name: user.name,
+            profile_image: user.profile_image
+          } : null,
+          poll: pollData
+        };
+      })
+    );
+    
+    return sendSuccess(res, 'Messages retrieved successfully', enrichedMessages);
   } catch (error) {
     return sendError(res, error.message, 500);
   }
@@ -215,10 +327,30 @@ exports.votePoll = async (req, res) => {
       return sendError(res, 'Option not found', 404);
     }
     
+    // Check if user already voted
+    const existingVote = poll.votes.find(v => v.user_id === user_id);
+    if (existingVote) {
+      // Remove old vote
+      const oldOption = poll.options.find(opt => opt.option_id === existingVote.option_id);
+      if (oldOption) {
+        oldOption.vote_count = Math.max(0, oldOption.vote_count - 1);
+      }
+      // Update vote to new option
+      existingVote.option_id = option_id;
+    } else {
+      // Add new vote
+      poll.votes.push({
+        user_id,
+        option_id,
+        created_at: new Date()
+      });
+    }
+    
+    // Update vote count
     option.vote_count += 1;
     await poll.save();
     
-    return sendSuccess(res, 'Vote recorded successfully');
+    return sendSuccess(res, 'Vote recorded successfully', poll);
   } catch (error) {
     return sendError(res, error.message, 500);
   }
@@ -237,8 +369,242 @@ exports.getPollResults = async (req, res) => {
     }
     
     return sendSuccess(res, 'Poll results retrieved successfully', {
-      options: poll.options
+      question: poll.question,
+      options: poll.options,
+      total_votes: poll.votes.length
     });
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Get chat lists (Their Plans, My Plans, Groups)
+ */
+exports.getChatLists = async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    const { BasePlan } = require('../models');
+    const { User } = require('../models');
+    
+    if (!user_id) {
+      return sendError(res, 'User ID is required', 400);
+    }
+    
+    // Get all groups where user is a member (including individual chats)
+    const userGroups = await ChatGroup.find({
+      members: user_id,
+      is_closed: false
+    }).lean();
+    
+    console.log(`📋 Found ${userGroups.length} groups for user ${user_id}`);
+    
+    // Get all plans where user is a member of a group
+    const planIds = userGroups.map(g => g.plan_id);
+    const plans = await BasePlan.find({
+      plan_id: { $in: planIds },
+      deleted_at: null
+    }).lean();
+    
+    // Separate into "Their Plans" (plans created by others) and "My Plans" (plans created by user)
+    const theirPlans = [];
+    const myPlans = [];
+    const groups = [];
+    
+    for (const group of userGroups) {
+      const plan = plans.find(p => p.plan_id === group.plan_id);
+      if (!plan) continue;
+      
+      // Get last message
+      const lastMessage = await ChatMessage.findOne({ group_id: group.group_id })
+        .sort({ timestamp: -1 })
+        .lean();
+      
+      // Get plan author
+      const author = await User.findOne({ user_id: plan.user_id }).lean();
+      
+      // For individual chats (2 members), get the other user's info
+      let otherUser = null;
+      if (group.members.length === 2) {
+        const otherUserId = group.members.find(id => id !== user_id);
+        if (otherUserId) {
+          otherUser = await User.findOne({ user_id: otherUserId }).lean();
+        }
+      }
+      
+      const chatItem = {
+        group_id: group.group_id,
+        plan_id: plan.plan_id,
+        plan_title: plan.title,
+        plan_description: plan.description,
+        plan_media: plan.media || [],
+        author_id: plan.user_id,
+        author_name: author?.name || 'Unknown',
+        author_image: author?.profile_image || null,
+        // For individual chats, include other user info
+        other_user: otherUser ? {
+          user_id: otherUser.user_id,
+          name: otherUser.name,
+          profile_image: otherUser.profile_image
+        } : null,
+        last_message: lastMessage ? {
+          content: lastMessage.content,
+          type: lastMessage.type,
+          timestamp: lastMessage.timestamp,
+          user_id: lastMessage.user_id
+        } : null,
+        member_count: group.members.length,
+        is_group: group.members.length > 2,
+        group_name: group.group_name || (group.members.length === 2 && otherUser ? otherUser.name : plan.title)
+      };
+      
+      // Individual chats (2 members) go to their_plans or my_plans
+      // Group chats (3+ members) go to groups
+      if (group.members.length === 2) {
+        // Individual chat - determine if it's "my plan" or "their plan"
+        if (plan.user_id === user_id) {
+          myPlans.push(chatItem);
+        } else {
+          theirPlans.push(chatItem);
+        }
+      } else {
+        // Group chat - add to groups list
+        groups.push({
+          ...chatItem,
+          members: group.members
+        });
+      }
+    }
+    
+    // Sort by last message timestamp
+    const sortByLastMessage = (a, b) => {
+      const aTime = a.last_message?.timestamp ? new Date(a.last_message.timestamp).getTime() : 0;
+      const bTime = b.last_message?.timestamp ? new Date(b.last_message.timestamp).getTime() : 0;
+      return bTime - aTime;
+    };
+    
+    theirPlans.sort(sortByLastMessage);
+    myPlans.sort(sortByLastMessage);
+    groups.sort(sortByLastMessage);
+    
+    return sendSuccess(res, 'Chat lists retrieved successfully', {
+      their_plans: theirPlans,
+      my_plans: myPlans,
+      groups: groups
+    });
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Add reaction to message
+ */
+exports.addReaction = async (req, res) => {
+  try {
+    const { message_id, user_id, emoji_type } = req.body;
+    
+    const message = await ChatMessage.findOne({ message_id });
+    if (!message) {
+      return sendError(res, 'Message not found', 404);
+    }
+    
+    // Remove existing reaction from this user
+    message.reactions = message.reactions.filter(
+      (r) => !(r.user_id === user_id && r.emoji_type === emoji_type)
+    );
+    
+    // Add new reaction
+    message.reactions.push({
+      reaction_id: generateId('react'),
+      user_id,
+      emoji_type,
+      created_at: new Date()
+    });
+    
+    await message.save();
+    
+    return sendSuccess(res, 'Reaction added successfully', message);
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Remove reaction from message
+ */
+exports.removeReaction = async (req, res) => {
+  try {
+    const { message_id, user_id, emoji_type } = req.body;
+    
+    const message = await ChatMessage.findOne({ message_id });
+    if (!message) {
+      return sendError(res, 'Message not found', 404);
+    }
+    
+    message.reactions = message.reactions.filter(
+      (r) => !(r.user_id === user_id && r.emoji_type === emoji_type)
+    );
+    
+    await message.save();
+    
+    return sendSuccess(res, 'Reaction removed successfully', message);
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Close group chat
+ */
+exports.closeGroup = async (req, res) => {
+  try {
+    const { group_id, user_id } = req.body;
+    
+    const group = await ChatGroup.findOne({ group_id });
+    if (!group) {
+      return sendError(res, 'Group not found', 404);
+    }
+    
+    // Check if user is the creator or admin
+    if (group.created_by !== user_id) {
+      return sendError(res, 'Only group creator can close the group', 403);
+    }
+    
+    group.is_closed = true;
+    group.closed_by = user_id;
+    group.closed_at = new Date();
+    await group.save();
+    
+    return sendSuccess(res, 'Group closed successfully', group);
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Reopen group chat
+ */
+exports.reopenGroup = async (req, res) => {
+  try {
+    const { group_id, user_id } = req.body;
+    
+    const group = await ChatGroup.findOne({ group_id });
+    if (!group) {
+      return sendError(res, 'Group not found', 404);
+    }
+    
+    // Check if user is the creator or admin
+    if (group.created_by !== user_id) {
+      return sendError(res, 'Only group creator can reopen the group', 403);
+    }
+    
+    group.is_closed = false;
+    group.closed_by = null;
+    group.closed_at = null;
+    await group.save();
+    
+    return sendSuccess(res, 'Group reopened successfully', group);
   } catch (error) {
     return sendError(res, error.message, 500);
   }

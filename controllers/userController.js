@@ -37,6 +37,16 @@ exports.getUserProfile = async (req, res) => {
       return sendError(res, 'User not found', 404);
     }
     
+    // Get user's recent plans (limit 5)
+    const recentPlans = await BasePlan.find({
+      user_id,
+      deleted_at: null,
+      is_draft: false
+    })
+    .sort({ created_at: -1 })
+    .limit(5)
+    .lean();
+    
     // Return public profile (exclude sensitive data)
     const profile = {
       user_id: user.user_id,
@@ -45,7 +55,17 @@ exports.getUserProfile = async (req, res) => {
       bio: user.bio,
       gender: user.gender,
       is_business: user.is_business,
-      created_at: user.created_at
+      interests: user.interests || [],
+      social_media: user.social_media || {},
+      created_at: user.created_at,
+      recent_plans: recentPlans.map(plan => ({
+        plan_id: plan.plan_id,
+        title: plan.title,
+        description: plan.description,
+        media: plan.media || [],
+        category_sub: plan.category_sub || [],
+        created_at: plan.created_at
+      }))
     };
     
     return sendSuccess(res, 'Profile retrieved successfully', profile);
