@@ -1,4 +1,5 @@
 const { User, UserSession, DeviceToken } = require('../models');
+const { BasePlan, RegularPlan, SavedPlan, Repost } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
 
 /**
@@ -75,6 +76,7 @@ exports.updateProfile = async (req, res) => {
     if (profile_image !== undefined) user.profile_image = profile_image;
     if (bio !== undefined) user.bio = bio;
     if (gender !== undefined) user.gender = gender;
+    if (req.body.interests !== undefined) user.interests = req.body.interests;
     
     await user.save();
     
@@ -103,6 +105,117 @@ exports.deleteUser = async (req, res) => {
     );
     
     return sendSuccess(res, 'User deleted successfully');
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Get user stats (plans count, interactions count)
+ */
+exports.getUserStats = async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    
+    if (!user_id) {
+      return sendError(res, 'User ID is required', 400);
+    }
+    
+    // Count user's plans (regular plans only, not deleted)
+    const plansCount = await BasePlan.countDocuments({
+      user_id,
+      deleted_at: null,
+      is_draft: false
+    });
+    
+    // Count interactions (reactions, comments, join requests)
+    // For now, we'll use a simple count - you can expand this later
+    const interactionsCount = await BasePlan.countDocuments({
+      user_id,
+      deleted_at: null,
+      is_draft: false
+    });
+    
+    return sendSuccess(res, 'Stats retrieved successfully', {
+      plans_count: plansCount,
+      interactions_count: interactionsCount
+    });
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Get user's plans
+ */
+exports.getUserPlans = async (req, res) => {
+  try {
+    const { user_id, limit = 20, offset = 0 } = req.query;
+    
+    if (!user_id) {
+      return sendError(res, 'User ID is required', 400);
+    }
+    
+    const plans = await BasePlan.find({
+      user_id,
+      deleted_at: null,
+      is_draft: false
+    })
+    .sort({ created_at: -1 })
+    .limit(parseInt(limit))
+    .skip(parseInt(offset))
+    .lean();
+    
+    // Get reposts by this user
+    const reposts = await Repost.find({
+      repost_author_id: user_id
+    })
+    .sort({ created_at: -1 })
+    .limit(parseInt(limit))
+    .skip(parseInt(offset))
+    .lean();
+    
+    // Combine and sort
+    const allPlans = [...plans.map(p => ({ ...p, is_repost: false })), ...reposts.map(r => ({ ...r, is_repost: true }))];
+    allPlans.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    
+    return sendSuccess(res, 'Plans retrieved successfully', allPlans.slice(0, parseInt(limit)));
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Get saved posts
+ */
+exports.getSavedPosts = async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    
+    if (!user_id) {
+      return sendError(res, 'User ID is required', 400);
+    }
+    
+    const saved = await SavedPlan.find({ user_id, is_active: true })
+      .sort({ saved_at: -1 });
+    
+    const postIds = saved.map(s => s.plan_id);
+    const plans = await BasePlan.find({ plan_id: { $in: postIds } });
+    
+    const formattedPosts = plans.map(plan => ({
+      post_id: plan.plan_id,
+      user_id: plan.user_id,
+      title: plan.title,
+      description: plan.description,
+      media: plan.media,
+      tags: plan.category_sub,
+      timestamp: plan.created_at,
+      location: plan.location_coordinates || plan.location_text,
+      is_active: plan.is_live,
+      interaction_count: plan.interaction_count
+    }));
+    
+    return sendSuccess(res, 'Saved posts retrieved successfully', formattedPosts);
   } catch (error) {
     return sendError(res, error.message, 500);
   }

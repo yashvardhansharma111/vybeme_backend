@@ -23,6 +23,7 @@
   },
   "homepage": "https://github.com/yashvardhansharma111/vybeme_backend#readme",
   "dependencies": {
+    "@react-native-community/slider": "^5.1.1",
     "bcrypt": "^6.0.0",
     "cloudinary": "^2.8.0",
     "cors": "^2.8.5",

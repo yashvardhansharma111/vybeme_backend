@@ -32,6 +32,10 @@ const userSchema = new mongoose.Schema({
     enum: ['male', 'female', 'other'],
     default: null
   },
+  interests: {
+    type: [String],
+    default: []
+  },
   is_business: {
     type: Boolean,
     default: false
