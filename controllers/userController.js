@@ -222,14 +222,21 @@ exports.getSavedPosts = async (req, res) => {
     const postIds = saved.map(s => s.plan_id);
     const plans = await BasePlan.find({ plan_id: { $in: postIds } });
     
+    // Create a map of saved_at timestamps
+    const savedAtMap = {};
+    saved.forEach(s => {
+      savedAtMap[s.plan_id] = s.saved_at;
+    });
+    
     const formattedPosts = plans.map(plan => ({
       post_id: plan.plan_id,
       user_id: plan.user_id,
       title: plan.title,
       description: plan.description,
       media: plan.media,
-      tags: plan.category_sub,
-      timestamp: plan.created_at,
+      tags: [...(plan.category_sub || []), ...(plan.temporal_tags || [])],
+      timestamp: plan.created_at || plan.posted_at,
+      saved_at: savedAtMap[plan.plan_id],
       location: plan.location_coordinates || plan.location_text,
       is_active: plan.is_live,
       interaction_count: plan.interaction_count
