@@ -48,8 +48,15 @@ exports.getNotifications = async (req, res) => {
         if (user) {
           interaction.user = {
             user_id: user.user_id,
-            name: user.name,
-            profile_image: user.profile_image
+            name: user.name || `User ${user.user_id.slice(-4)}`, // Fallback to user_id if name is missing
+            profile_image: user.profile_image || null
+          };
+        } else {
+          // If user not found, still provide basic info
+          interaction.user = {
+            user_id: interaction.source_user_id,
+            name: `User ${interaction.source_user_id.slice(-4)}`,
+            profile_image: null
           };
         }
         
