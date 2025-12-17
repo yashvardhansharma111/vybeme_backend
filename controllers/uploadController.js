@@ -7,8 +7,19 @@ const { cleanupFile } = require('../middleware/upload');
  */
 exports.uploadImage = async (req, res) => {
   try {
+    console.log('📤 Upload request received');
+    console.log('📤 Request body keys:', Object.keys(req.body || {}));
+    console.log('📤 Request file:', req.file ? {
+      fieldname: req.file.fieldname,
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      size: req.file.size
+    } : 'No file');
+    console.log('📤 Request files:', req.files);
+    
     if (!req.file) {
-      return sendError(res, 'No file uploaded', 400);
+      console.error('❌ No file in request');
+      return sendError(res, 'No file uploaded. Please ensure the file field is named "file" and the file is included in the request.', 400);
     }
     
     const result = await uploadImage(req.file);
@@ -25,6 +36,7 @@ exports.uploadImage = async (req, res) => {
       size: result.bytes
     });
   } catch (error) {
+    console.error('❌ Upload error:', error);
     cleanupFile(req.file?.path);
     return sendError(res, error.message, 500);
   }

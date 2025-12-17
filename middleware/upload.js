@@ -83,11 +83,33 @@ const handleMulterError = (err, req, res, next) => {
 // Middleware for single file upload (optional - allows requests without files)
 const uploadSingle = (fieldName = 'file') => {
   return (req, res, next) => {
+    // Log request details for debugging
+    console.log('📥 Multer middleware - Field name:', fieldName);
+    console.log('📥 Request headers:', {
+      'content-type': req.headers['content-type'],
+      'content-length': req.headers['content-length']
+    });
+    
     const middleware = upload.single(fieldName);
     middleware(req, res, (err) => {
       if (err) {
+        console.error('❌ Multer error:', err);
         return handleMulterError(err, req, res, next);
       }
+      
+      // Log what multer received
+      console.log('📥 Multer result - req.file:', req.file ? {
+        fieldname: req.file.fieldname,
+        originalname: req.file.originalname,
+        mimetype: req.file.mimetype,
+        size: req.file.size,
+        path: req.file.path
+      } : 'No file');
+      
+      // Log request body to see what was sent
+      console.log('📥 Request body:', req.body);
+      console.log('📥 Request body keys:', Object.keys(req.body || {}));
+      
       // If no file uploaded, that's okay - continue
       next();
     });
