@@ -1,4 +1,4 @@
-const { PlanInteraction, BasePlan, Notification } = require('../models');
+const { PlanInteraction, BasePlan, Notification, Repost } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
 
 /**
@@ -22,18 +22,52 @@ exports.addComment = async (req, res) => {
       { $inc: { interaction_count: 1 } }
     );
     
-    // Create notification for post author
+    // Create notification for post author(s)
     const plan = await BasePlan.findOne({ plan_id: post_id });
     if (plan && plan.user_id !== user_id) {
-      await Notification.create({
-        notification_id: generateId('notification'),
-        user_id: plan.user_id, // Notify the post author
-        type: 'comment',
-        source_plan_id: post_id,
-        source_user_id: user_id,
-        payload: { comment_id: interaction.interaction_id, text },
-        is_read: false
-      });
+      // Check if this is a repost
+      const repost = await Repost.findOne({ original_plan_id: post_id });
+      
+      if (repost) {
+        // This is a repost - notify both the repost author and original author
+        // Notify repost author
+        if (repost.repost_author_id !== user_id) {
+          await Notification.create({
+            notification_id: generateId('notification'),
+            user_id: repost.repost_author_id,
+            type: 'comment',
+            source_plan_id: post_id,
+            source_user_id: user_id,
+            payload: { comment_id: interaction.interaction_id, text, is_repost: true },
+            is_read: false
+          });
+        }
+        
+        // Notify original author
+        const originalPlan = await BasePlan.findOne({ plan_id: repost.original_plan_id });
+        if (originalPlan && originalPlan.user_id !== user_id && originalPlan.user_id !== repost.repost_author_id) {
+          await Notification.create({
+            notification_id: generateId('notification'),
+            user_id: originalPlan.user_id,
+            type: 'comment',
+            source_plan_id: repost.original_plan_id,
+            source_user_id: user_id,
+            payload: { comment_id: interaction.interaction_id, text, is_repost: true, repost_id: repost.repost_id },
+            is_read: false
+          });
+        }
+      } else {
+        // Regular post - notify only the post author
+        await Notification.create({
+          notification_id: generateId('notification'),
+          user_id: plan.user_id,
+          type: 'comment',
+          source_plan_id: post_id,
+          source_user_id: user_id,
+          payload: { comment_id: interaction.interaction_id, text },
+          is_read: false
+        });
+      }
     }
     
     return sendSuccess(res, 'Comment added successfully', { comment_id: interaction.interaction_id }, 201);
@@ -118,18 +152,52 @@ exports.addReaction = async (req, res) => {
       { $inc: { interaction_count: 1 } }
     );
     
-    // Create notification for post author
+    // Create notification for post author(s)
     const plan = await BasePlan.findOne({ plan_id: post_id });
     if (plan && plan.user_id !== user_id) {
-      await Notification.create({
-        notification_id: generateId('notification'),
-        user_id: plan.user_id, // Notify the post author
-        type: 'reaction',
-        source_plan_id: post_id,
-        source_user_id: user_id,
-        payload: { emoji_type },
-        is_read: false
-      });
+      // Check if this is a repost
+      const repost = await Repost.findOne({ original_plan_id: post_id });
+      
+      if (repost) {
+        // This is a repost - notify both the repost author and original author
+        // Notify repost author
+        if (repost.repost_author_id !== user_id) {
+          await Notification.create({
+            notification_id: generateId('notification'),
+            user_id: repost.repost_author_id,
+            type: 'reaction',
+            source_plan_id: post_id,
+            source_user_id: user_id,
+            payload: { emoji_type, is_repost: true },
+            is_read: false
+          });
+        }
+        
+        // Notify original author
+        const originalPlan = await BasePlan.findOne({ plan_id: repost.original_plan_id });
+        if (originalPlan && originalPlan.user_id !== user_id && originalPlan.user_id !== repost.repost_author_id) {
+          await Notification.create({
+            notification_id: generateId('notification'),
+            user_id: originalPlan.user_id,
+            type: 'reaction',
+            source_plan_id: repost.original_plan_id,
+            source_user_id: user_id,
+            payload: { emoji_type, is_repost: true, repost_id: repost.repost_id },
+            is_read: false
+          });
+        }
+      } else {
+        // Regular post - notify only the post author
+        await Notification.create({
+          notification_id: generateId('notification'),
+          user_id: plan.user_id,
+          type: 'reaction',
+          source_plan_id: post_id,
+          source_user_id: user_id,
+          payload: { emoji_type },
+          is_read: false
+        });
+      }
     }
     
     return sendSuccess(res, 'Reaction added successfully');
@@ -318,23 +386,72 @@ exports.createJoinRequestWithComment = async (req, res) => {
       status: 'pending' // Pending approval
     });
     
-    await BasePlan.updateOne(
-      { plan_id: post_id },
-      { $inc: { interaction_count: 1 } }
-    );
+    // Check if post_id is a repost_id first
+    let repost = await Repost.findOne({ repost_id: post_id });
+    let plan = null;
+    let originalPlan = null;
     
-    // Create notification for post author
-    const plan = await BasePlan.findOne({ plan_id: post_id });
+    if (repost) {
+      // This post_id is a repost_id, update the original plan's interaction count
+      await BasePlan.updateOne(
+        { plan_id: repost.original_plan_id },
+        { $inc: { interaction_count: 1 } }
+      );
+      originalPlan = await BasePlan.findOne({ plan_id: repost.original_plan_id });
+      plan = originalPlan;
+    } else {
+      // Regular post
+      await BasePlan.updateOne(
+        { plan_id: post_id },
+        { $inc: { interaction_count: 1 } }
+      );
+      plan = await BasePlan.findOne({ plan_id: post_id });
+      if (plan) {
+        repost = await Repost.findOne({ original_plan_id: post_id });
+      }
+    }
+    
     if (plan && plan.user_id !== user_id) {
-      await Notification.create({
-        notification_id: generateId('notification'),
-        user_id: plan.user_id,
-        type: 'comment',
-        source_plan_id: post_id,
-        source_user_id: user_id,
-        payload: { request_id: interaction.interaction_id, text },
-        is_read: false
-      });
+      // Check if this is a repost
+      if (repost) {
+        // This is a repost - notify both the repost author and original author
+        // Notify repost author
+        if (repost.repost_author_id !== user_id) {
+          await Notification.create({
+            notification_id: generateId('notification'),
+            user_id: repost.repost_author_id,
+            type: 'comment',
+            source_plan_id: repost.repost_id, // Use repost_id as source
+            source_user_id: user_id,
+            payload: { request_id: interaction.interaction_id, text, is_repost: true },
+            is_read: false
+          });
+        }
+        
+        // Notify original author
+        if (originalPlan && originalPlan.user_id !== user_id && originalPlan.user_id !== repost.repost_author_id) {
+          await Notification.create({
+            notification_id: generateId('notification'),
+            user_id: originalPlan.user_id,
+            type: 'comment',
+            source_plan_id: repost.original_plan_id,
+            source_user_id: user_id,
+            payload: { request_id: interaction.interaction_id, text, is_repost: true, repost_id: repost.repost_id },
+            is_read: false
+          });
+        }
+      } else {
+        // Regular post - notify only the post author
+        await Notification.create({
+          notification_id: generateId('notification'),
+          user_id: plan.user_id,
+          type: 'comment',
+          source_plan_id: post_id,
+          source_user_id: user_id,
+          payload: { request_id: interaction.interaction_id, text },
+          is_read: false
+        });
+      }
     }
     
     return sendSuccess(res, 'Interest sent successfully', { request_id: interaction.interaction_id }, 201);

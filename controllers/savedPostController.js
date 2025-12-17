@@ -1,4 +1,4 @@
-const { SavedPlan, BasePlan } = require('../models');
+const { SavedPlan, BasePlan, Repost } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
 
 /**
@@ -8,14 +8,21 @@ exports.savePost = async (req, res) => {
   try {
     const { user_id, post_id } = req.body;
     
-    // Check if already saved
-    const existing = await SavedPlan.findOne({ user_id, plan_id: post_id });
+    // Check if post_id is a repost - if so, use the original plan ID
+    let actualPlanId = post_id;
+    const repost = await Repost.findOne({ repost_id: post_id });
+    if (repost) {
+      actualPlanId = repost.original_plan_id;
+    }
+    
+    // Check if already saved (using actual plan ID)
+    const existing = await SavedPlan.findOne({ user_id, plan_id: actualPlanId });
     if (existing) {
       return sendError(res, 'Post already saved', 400);
     }
     
     // Get post type - BasePlan.findOne will return the correct discriminator (RegularPlan or BusinessPlan)
-    const plan = await BasePlan.findOne({ plan_id: post_id });
+    const plan = await BasePlan.findOne({ plan_id: actualPlanId });
     if (!plan) {
       return sendError(res, 'Post not found', 404);
     }
@@ -46,7 +53,7 @@ exports.savePost = async (req, res) => {
     const saved = await SavedPlan.create({
       save_id: generateId('save'),
       user_id,
-      plan_id: post_id,
+      plan_id: actualPlanId, // Use actual plan ID (original plan ID for reposts)
       post_type: postType,
       is_active: true
     });
@@ -67,7 +74,14 @@ exports.unsavePost = async (req, res) => {
   try {
     const { user_id, post_id } = req.body;
     
-    await SavedPlan.deleteOne({ user_id, plan_id: post_id });
+    // Check if post_id is a repost - if so, use the original plan ID
+    let actualPlanId = post_id;
+    const repost = await Repost.findOne({ repost_id: post_id });
+    if (repost) {
+      actualPlanId = repost.original_plan_id;
+    }
+    
+    await SavedPlan.deleteOne({ user_id, plan_id: actualPlanId });
     
     return sendSuccess(res, 'Post unsaved successfully');
   } catch (error) {

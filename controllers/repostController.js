@@ -6,17 +6,27 @@ const { sendSuccess, sendError, generateId } = require('../utils');
  */
 exports.createRepost = async (req, res) => {
   try {
-    const { original_post_id, added_content, repost_author_id } = req.body;
+    const { original_plan_id, added_content, repost_author_id } = req.body;
+    
+    if (!original_plan_id || !repost_author_id) {
+      return sendError(res, 'original_plan_id and repost_author_id are required', 400);
+    }
+    
+    // Check if original post exists
+    const originalPlan = await BasePlan.findOne({ plan_id: original_plan_id });
+    if (!originalPlan) {
+      return sendError(res, 'Original post not found', 404);
+    }
     
     // Check if original post is a repost (cannot repost a repost)
-    const originalRepost = await Repost.findOne({ original_plan_id: original_post_id });
+    const originalRepost = await Repost.findOne({ original_plan_id });
     if (originalRepost) {
       return sendError(res, 'Cannot repost a repost', 400);
     }
     
     const repost = await Repost.create({
       repost_id: generateId('repost'),
-      original_plan_id: original_post_id,
+      original_plan_id,
       repost_author_id,
       added_content: added_content || '',
       cannot_be_reposted: true
@@ -24,18 +34,17 @@ exports.createRepost = async (req, res) => {
     
     // Increment repost count on original plan
     await BasePlan.updateOne(
-      { plan_id: original_post_id },
+      { plan_id: original_plan_id },
       { $inc: { reposts_count: 1 } }
     );
     
     // Create notification for original post author
-    const originalPlan = await BasePlan.findOne({ plan_id: original_post_id });
-    if (originalPlan && originalPlan.user_id !== repost_author_id) {
+    if (originalPlan.user_id !== repost_author_id) {
       await Notification.create({
         notification_id: generateId('notification'),
         user_id: originalPlan.user_id, // Notify the original post author
         type: 'repost',
-        source_plan_id: original_post_id,
+        source_plan_id: original_plan_id,
         source_user_id: repost_author_id,
         payload: { repost_id: repost.repost_id, added_content },
         is_read: false
