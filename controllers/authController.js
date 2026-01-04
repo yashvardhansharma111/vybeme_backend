@@ -14,9 +14,9 @@ exports.sendOTP = async (req, res, next) => {
       return sendError(res, 'Invalid phone number', 400);
     }
     
-    // Dummy phone number for Play Store testing - always use OTP 0000
+    // Dummy phone number for Play Store testing - always use OTP 000000
     const DUMMY_PHONE = '9999988888';
-    const DUMMY_OTP = '0000';
+    const DUMMY_OTP = '000000';
     
     let otp;
     if (phone_number === DUMMY_PHONE) {
@@ -85,9 +85,9 @@ exports.verifyOTP = async (req, res, next) => {
       return sendError(res, 'Phone number is required', 400);
     }
     
-    // Dummy phone number for Play Store testing - always accept OTP 0000
+    // Dummy phone number for Play Store testing - always accept OTP 000000
     const DUMMY_PHONE = '9999988888';
-    const DUMMY_OTP = '0000';
+    const DUMMY_OTP = '000000';
     
     // For dummy phone with correct OTP, bypass all checks
     if (phone_number === DUMMY_PHONE && otpValue === DUMMY_OTP) {
@@ -261,9 +261,9 @@ exports.resendOTP = async (req, res, next) => {
       return sendError(res, 'Invalid phone number', 400);
     }
     
-    // Dummy phone number for Play Store testing - always use OTP 0000
+    // Dummy phone number for Play Store testing - always use OTP 000000
     const DUMMY_PHONE = '9999988888';
-    const DUMMY_OTP = '0000';
+    const DUMMY_OTP = '000000';
     
     let otp;
     if (phone_number === DUMMY_PHONE) {
