@@ -14,7 +14,17 @@ exports.sendOTP = async (req, res, next) => {
       return sendError(res, 'Invalid phone number', 400);
     }
     
-    const otp = generateOTP(6);
+    // Dummy phone number for Play Store testing - always use OTP 0000
+    const DUMMY_PHONE = '9999988888';
+    const DUMMY_OTP = '0000';
+    
+    let otp;
+    if (phone_number === DUMMY_PHONE) {
+      otp = DUMMY_OTP;
+    } else {
+      otp = generateOTP(6);
+    }
+    
     const otpHash = await hashString(otp);
     const otp_id = generateId('otp');
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
@@ -75,6 +85,53 @@ exports.verifyOTP = async (req, res, next) => {
       return sendError(res, 'Phone number is required', 400);
     }
     
+    // Dummy phone number for Play Store testing - always accept OTP 0000
+    const DUMMY_PHONE = '9999988888';
+    const DUMMY_OTP = '0000';
+    
+    // For dummy phone with correct OTP, bypass all checks
+    if (phone_number === DUMMY_PHONE && otpValue === DUMMY_OTP) {
+      // Skip OTP validation for dummy phone - proceed directly to user creation/login
+      let isNewUser = false;
+      let user = await User.findOne({ phone_number });
+      if (!user) {
+        isNewUser = true;
+        user = await User.create({
+          user_id: generateId('user'),
+          phone_number,
+          phone_verified: true
+        });
+      } else {
+        user.phone_verified = true;
+        await user.save();
+      }
+      
+      // Create session
+      const weekStart = new Date();
+      weekStart.setHours(0, 0, 0, 0);
+      weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+      
+      const session = await UserSession.create({
+        session_id: generateId('session'),
+        user_id: user.user_id,
+        week_start_timestamp: weekStart,
+        session_count_this_week: 1,
+        has_voted_this_week: false
+      });
+      
+      // Generate JWT tokens
+      const accessToken = generateAccessToken({ user_id: user.user_id, session_id: session.session_id });
+      const refreshToken = generateRefreshToken({ user_id: user.user_id, session_id: session.session_id });
+      
+      return sendSuccess(res, 'OTP verified successfully', {
+        user_id: user.user_id,
+        session_id: session.session_id,
+        is_new_user: isNewUser,
+        access_token: accessToken,
+        refresh_token: refreshToken
+      });
+    }
+    
     // Get OTP from node-cache (primary storage)
     let authOTP = getOTP(otp_id, phone_number);
     
@@ -113,8 +170,9 @@ exports.verifyOTP = async (req, res, next) => {
     
     // Verify OTP
     const otpHash = await hashString(otpValue);
+    const isValidOTP = (otpHash === authOTP.otp_hash);
     
-    if (otpHash !== authOTP.otp_hash) {
+    if (!isValidOTP) {
       // Increment attempt count in cache
       incrementAttemptCount(otp_id, phone_number);
       
@@ -203,7 +261,17 @@ exports.resendOTP = async (req, res, next) => {
       return sendError(res, 'Invalid phone number', 400);
     }
     
-    const otp = generateOTP(6);
+    // Dummy phone number for Play Store testing - always use OTP 0000
+    const DUMMY_PHONE = '9999988888';
+    const DUMMY_OTP = '0000';
+    
+    let otp;
+    if (phone_number === DUMMY_PHONE) {
+      otp = DUMMY_OTP;
+    } else {
+      otp = generateOTP(6);
+    }
+    
     const otpHash = await hashString(otp);
     const otp_id = generateId('otp');
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
