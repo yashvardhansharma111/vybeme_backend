@@ -28,10 +28,53 @@ initializeSocket(io);
 // Connect to MongoDB
 connectDB();
 
+// CORS configuration
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, Postman, or curl)
+    if (!origin) return callback(null, true);
+    
+    // Allow all origins in development (including localhost and ngrok)
+    if (process.env.NODE_ENV === 'development' || !process.env.NODE_ENV) {
+      return callback(null, true);
+    }
+    
+    // In production, you can specify allowed origins here
+    const allowedOrigins = [
+      'http://localhost:8081',
+      'http://localhost:19006',
+      'http://localhost:3000',
+      'https://vybeme.app', // Add your production domain
+    ];
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('ngrok')) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'ngrok-skip-browser-warning',
+    'Accept',
+    'Origin',
+  ],
+  exposedHeaders: ['Content-Length', 'Content-Type'],
+  preflightContinue: false,
+  optionsSuccessStatus: 204,
+};
+
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Handle preflight requests explicitly
+app.options('*', cors(corsOptions));
 
 // Request logging middleware
 app.use((req, res, next) => {
