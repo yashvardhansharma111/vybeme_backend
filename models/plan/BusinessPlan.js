@@ -16,6 +16,29 @@ const addDetailSchema = new mongoose.Schema({
   }
 }, { _id: false });
 
+const passSchema = new mongoose.Schema({
+  pass_id: {
+    type: String,
+    required: true
+  },
+  name: {
+    type: String,
+    required: true
+  },
+  price: {
+    type: Number,
+    required: true
+  },
+  description: {
+    type: String,
+    default: ''
+  },
+  capacity: {
+    type: Number,
+    default: null // Number of people this pass is for (e.g., 1, 2, 4)
+  }
+}, { _id: false });
+
 const businessPlanSchema = new mongoose.Schema({
   type: {
     type: String,
@@ -77,6 +100,22 @@ const businessPlanSchema = new mongoose.Schema({
   reshare_to_announcement_group: {
     type: Boolean,
     default: false
+  },
+  passes: {
+    type: [passSchema],
+    default: []
+  },
+  venue_required: {
+    type: Boolean,
+    default: false
+  },
+  allow_view_guest_list: {
+    type: Boolean,
+    default: false
+  },
+  event_production: {
+    type: [String],
+    default: [] // e.g., ["Musician", "Content Creator"]
   }
 });
 

@@ -6,6 +6,7 @@ const categoryRoutes = require('./categoryRoutes');
 const feedRoutes = require('./feedRoutes');
 const postRoutes = require('./postRoutes');
 const businessPostRoutes = require('./businessPostRoutes');
+const planRoutes = require('./planRoutes');
 const repostRoutes = require('./repostRoutes');
 const interactionRoutes = require('./interactionRoutes');
 const chatRoutes = require('./chatRoutes');
@@ -26,6 +27,7 @@ router.use('/user', userRoutes);
 router.use('/tags', categoryRoutes);
 router.use('/feed', feedRoutes);
 router.use('/post', postRoutes);
+router.use('/plan', planRoutes);
 router.use('/business', businessPostRoutes);
 router.use('/repost', repostRoutes);
 // Interaction routes (comments, reactions, join) - using /post prefix
