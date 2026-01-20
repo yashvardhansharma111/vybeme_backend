@@ -3,16 +3,28 @@ const { sendSuccess, sendError, generateId } = require('../utils');
 
 /**
  * Create chat group
+ * When a new group is created by the same user for the same plan,
+ * previous groups created by that user automatically become announcements
  */
 exports.createGroup = async (req, res) => {
   try {
     const { post_id, created_by, member_ids = [], group_name } = req.body;
     
-    // Check if this is an individual chat (2 members) and if it already exists
+    if (!post_id || !created_by) {
+      return sendError(res, 'post_id and created_by are required', 400);
+    }
+    
+    // Groups must have at least 2 members (created_by + at least 1 other)
+    if (member_ids.length === 0) {
+      return sendError(res, 'At least one member is required to create a group', 400);
+    }
+    
+    // Check if this is an individual chat (2 members total) and if it already exists
     if (member_ids.length === 1) {
       const existingChat = await ChatGroup.findOne({
         plan_id: post_id,
-        members: { $all: [created_by, ...member_ids], $size: 2 }
+        members: { $all: [created_by, ...member_ids], $size: 2 },
+        is_closed: false
       });
       
       if (existingChat) {
@@ -20,6 +32,32 @@ exports.createGroup = async (req, res) => {
       }
     }
     
+    // Find all existing groups for this plan created by the same user
+    // These will be converted to announcement groups
+    const previousGroups = await ChatGroup.find({
+      plan_id: post_id,
+      created_by: created_by,
+      is_announcement_group: false,
+      is_closed: false
+    });
+    
+    // Convert previous groups to announcements
+    if (previousGroups.length > 0) {
+      await ChatGroup.updateMany(
+        {
+          plan_id: post_id,
+          created_by: created_by,
+          is_announcement_group: false,
+          is_closed: false
+        },
+        {
+          $set: { is_announcement_group: true }
+        }
+      );
+      console.log(`✅ Converted ${previousGroups.length} previous group(s) to announcements for plan ${post_id}`);
+    }
+    
+    // Create new group
     const group = await ChatGroup.create({
       group_id: generateId('group'),
       plan_id: post_id,
@@ -237,11 +275,51 @@ exports.getMessages = async (req, res) => {
         if (msg.type === 'poll' && msg.content?.poll_id) {
           const poll = await PollMessage.findOne({ poll_id: msg.content.poll_id }).lean();
           if (poll) {
+            // Get user's vote if exists
+            const userVote = poll.votes?.find(v => v.user_id === msg.user_id);
+            
+            // Get voter profiles for each option (limit to 3 for display)
+            const { User } = require('../models');
+            const optionsWithVoters = await Promise.all(
+              poll.options.map(async (option) => {
+                const votersForOption = poll.votes?.filter(v => v.option_id === option.option_id) || [];
+                const voterProfiles = await Promise.all(
+                  votersForOption.slice(0, 3).map(async (vote) => {
+                    const voter = await User.findOne({ user_id: vote.user_id }).lean();
+                    return voter ? {
+                      user_id: voter.user_id,
+                      profile_image: voter.profile_image
+                    } : null;
+                  })
+                );
+                
+                return {
+                  ...option,
+                  voters: voterProfiles.filter(v => v !== null)
+                };
+              })
+            );
+            
             pollData = {
               poll_id: poll.poll_id,
               question: poll.question,
-              options: poll.options,
-              votes: poll.votes || []
+              options: optionsWithVoters,
+              user_vote: userVote?.option_id || null
+            };
+          }
+        }
+        
+        // Handle plan sharing messages
+        let sharedPlanData = null;
+        if (msg.type === 'plan' && msg.content?.plan_id) {
+          const { BasePlan } = require('../models');
+          const plan = await BasePlan.findOne({ plan_id: msg.content.plan_id }).lean();
+          if (plan) {
+            sharedPlanData = {
+              plan_id: plan.plan_id,
+              title: plan.title,
+              description: plan.description,
+              media: plan.media || []
             };
           }
         }
@@ -253,7 +331,8 @@ exports.getMessages = async (req, res) => {
             name: user.name,
             profile_image: user.profile_image
           } : null,
-          poll: pollData
+          poll: pollData,
+          shared_plan: sharedPlanData
         };
       })
     );
@@ -362,15 +441,37 @@ exports.votePoll = async (req, res) => {
 exports.getPollResults = async (req, res) => {
   try {
     const { poll_id } = req.params;
+    const { User } = require('../models');
     const poll = await PollMessage.findOne({ poll_id });
     
     if (!poll) {
       return sendError(res, 'Poll not found', 404);
     }
     
+    // Get voter information for each option
+    const optionsWithVoters = await Promise.all(
+      poll.options.map(async (option) => {
+        const votersForOption = poll.votes.filter(v => v.option_id === option.option_id);
+        const voterProfiles = await Promise.all(
+          votersForOption.slice(0, 10).map(async (vote) => {
+            const user = await User.findOne({ user_id: vote.user_id }).lean();
+            return user ? {
+              user_id: user.user_id,
+              profile_image: user.profile_image
+            } : null;
+          })
+        );
+        
+        return {
+          ...option.toObject(),
+          voters: voterProfiles.filter(v => v !== null)
+        };
+      })
+    );
+    
     return sendSuccess(res, 'Poll results retrieved successfully', {
       question: poll.question,
-      options: poll.options,
+      options: optionsWithVoters,
       total_votes: poll.votes.length
     });
   } catch (error) {
@@ -605,6 +706,43 @@ exports.reopenGroup = async (req, res) => {
     await group.save();
     
     return sendSuccess(res, 'Group reopened successfully', group);
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Get existing groups for a plan (to determine if "Create group" or "Add to group")
+ */
+exports.getPlanGroups = async (req, res) => {
+  try {
+    const { plan_id, user_id } = req.query;
+    
+    if (!plan_id || !user_id) {
+      return sendError(res, 'plan_id and user_id are required', 400);
+    }
+    
+    // Get all active groups (non-announcement) for this plan created by this user
+    const activeGroups = await ChatGroup.find({
+      plan_id,
+      created_by: user_id,
+      is_announcement_group: false,
+      is_closed: false
+    }).sort({ created_at: -1 });
+    
+    // Get the latest active group (if any)
+    const latestGroup = activeGroups.length > 0 ? activeGroups[0] : null;
+    
+    return sendSuccess(res, 'Plan groups retrieved successfully', {
+      has_active_group: activeGroups.length > 0,
+      latest_group: latestGroup ? {
+        group_id: latestGroup.group_id,
+        group_name: latestGroup.group_name,
+        members: latestGroup.members,
+        created_at: latestGroup.created_at
+      } : null,
+      total_active_groups: activeGroups.length
+    });
   } catch (error) {
     return sendError(res, error.message, 500);
   }

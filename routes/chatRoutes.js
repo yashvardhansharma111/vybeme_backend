@@ -31,6 +31,7 @@ router.delete('/message/reaction', authenticate, chatController.removeReaction);
 // Group management
 router.post('/group/close', authenticate, chatController.closeGroup);
 router.post('/group/reopen', authenticate, chatController.reopenGroup);
+router.get('/plan/groups', authenticate, chatController.getPlanGroups);
 
 module.exports = router;
 

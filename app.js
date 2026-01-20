@@ -73,11 +73,8 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-<<<<<<< HEAD
 // Note: CORS middleware automatically handles OPTIONS preflight requests
 
-=======
->>>>>>> a1a327a8a2fb3a84d0824e5c4cade04c6e7bccad
 // Request logging middleware
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.path} - ${new Date().toISOString()}`);

@@ -1,8 +1,9 @@
-const { BasePlan, RegularPlan, BusinessPlan, Repost } = require('../models');
+const { BasePlan, RegularPlan, BusinessPlan, Repost, User } = require('../models');
 const { sendSuccess, sendError, paginate } = require('../utils');
+const { rankPlansForUser, rankPlansForGuest } = require('../utils/ranking');
 
 /**
- * Get home feed
+ * Get home feed with personalized ranking algorithm
  */
 exports.getHomeFeed = async (req, res) => {
   try {
@@ -13,7 +14,8 @@ exports.getHomeFeed = async (req, res) => {
     const query = {
       post_status: 'published',
       is_live: true,
-      is_draft: false
+      is_draft: false,
+      deleted_at: null
     };
     
     if (category_main) {
@@ -30,82 +32,143 @@ exports.getHomeFeed = async (req, res) => {
       query.location_coordinates = { $exists: true };
     }
     
-    // Get regular posts
+    // Get all regular posts (we'll rank them, so get more than needed)
     const plans = await BasePlan.find(query)
-      .skip(parseInt(offset))
-      .limit(parseInt(limit) * 2) // Get more to account for filtering
-      .sort({ created_at: -1 });
+      .limit(parseInt(limit) * 5) // Get more plans to rank and filter
+      .lean();
+    
+    // Fetch user data if user_id is provided (for registered users)
+    let user = null;
+    if (user_id) {
+      user = await User.findOne({ user_id }).lean();
+    }
+    
+    // Apply ranking algorithm
+    let rankedPlans;
+    if (user) {
+      // Registered user: use personalized ranking
+      rankedPlans = rankPlansForUser(plans, user);
+    } else {
+      // Guest user: use guest ranking
+      rankedPlans = rankPlansForGuest(plans);
+    }
     
     // Check which posts are reposts
-    const planIds = plans.map(p => p.plan_id);
+    const planIds = rankedPlans.map(p => p.plan_id);
     const reposts = await Repost.find({ original_plan_id: { $in: planIds } });
     const repostMap = {};
     reposts.forEach(r => { repostMap[r.original_plan_id] = r; });
     
-    // Get reposts as separate feed items
+    // Get reposts as separate feed items (also need to rank them)
     const allReposts = await Repost.find({})
       .sort({ created_at: -1 })
-      .limit(parseInt(limit));
+      .limit(parseInt(limit) * 2)
+      .lean();
     
     // Get original plans for reposts
     const repostPlanIds = allReposts.map(r => r.original_plan_id);
-    const originalPlans = await BasePlan.find({ plan_id: { $in: repostPlanIds } });
+    const originalPlans = await BasePlan.find({ 
+      plan_id: { $in: repostPlanIds },
+      deleted_at: null
+    }).lean();
     const originalPlansMap = {};
     originalPlans.forEach(p => { originalPlansMap[p.plan_id] = p; });
     
+    // Rank reposts (using original plan data)
+    const repostPlans = allReposts
+      .map(repost => {
+        const originalPlan = originalPlansMap[repost.original_plan_id];
+        if (!originalPlan) return null;
+        // Use original plan data but repost timestamp for ranking
+        return {
+          ...originalPlan,
+          created_at: repost.created_at, // Use repost timestamp for recency
+          _isRepost: true,
+          _repostData: repost
+        };
+      })
+      .filter(Boolean);
+    
+    let rankedReposts = [];
+    if (repostPlans.length > 0) {
+      if (user) {
+        rankedReposts = rankPlansForUser(repostPlans, user);
+      } else {
+        rankedReposts = rankPlansForGuest(repostPlans);
+      }
+    }
+    
     // Format regular posts (mark if they're reposted)
-    const regularFeed = plans.map(plan => {
-      const isReposted = !!repostMap[plan.plan_id];
-      return {
-        post_id: plan.plan_id,
-        user_id: plan.user_id,
-        title: plan.title,
-        description: plan.description,
-        media: plan.media,
-        tags: plan.category_sub,
-        timestamp: plan.created_at,
-        location: plan.location_coordinates || plan.location_text,
-        is_active: plan.is_live,
-        interaction_count: plan.interaction_count,
-        is_repost: false,
-        cannot_be_reposted: isReposted
-      };
-    });
+    const regularFeed = rankedPlans
+      .slice(parseInt(offset), parseInt(offset) + parseInt(limit))
+      .map(plan => {
+        const isReposted = !!repostMap[plan.plan_id];
+        return {
+          post_id: plan.plan_id,
+          user_id: plan.user_id,
+          title: plan.title,
+          description: plan.description,
+          media: plan.media,
+          tags: plan.category_sub,
+          timestamp: plan.created_at,
+          location: plan.location_coordinates || plan.location_text,
+          is_active: plan.is_live,
+          interaction_count: plan.interaction_count,
+          is_repost: false,
+          cannot_be_reposted: isReposted,
+          // Include ranking score for debugging (optional, can remove in production)
+          _rankingScore: plan._rankingScore
+        };
+      });
     
     // Format reposts as separate feed items
-    const repostFeed = allReposts.map(repost => {
-      const originalPlan = originalPlansMap[repost.original_plan_id];
-      if (!originalPlan) return null;
-      
-      return {
-        post_id: repost.repost_id, // Use repost_id as the post_id for reposts
-        user_id: repost.repost_author_id, // Repost author
-        title: originalPlan.title, // Original post title
-        description: originalPlan.description, // Original post description
-        media: originalPlan.media,
-        tags: originalPlan.category_sub,
-        timestamp: repost.created_at, // Repost timestamp
-        location: originalPlan.location_coordinates || originalPlan.location_text,
-        is_active: originalPlan.is_live,
-        interaction_count: originalPlan.interaction_count,
-        is_repost: true,
-        repost_data: {
-          repost_id: repost.repost_id,
-          added_content: repost.added_content,
-          original_plan_id: repost.original_plan_id,
-          original_author_id: originalPlan.user_id,
-          cannot_be_reposted: repost.cannot_be_reposted
-        }
-      };
-    }).filter(Boolean);
+    const repostFeed = rankedReposts
+      .slice(0, Math.floor(parseInt(limit) * 0.3)) // 30% of feed can be reposts
+      .map(plan => {
+        const repost = plan._repostData;
+        return {
+          post_id: repost.repost_id, // Use repost_id as the post_id for reposts
+          user_id: repost.repost_author_id, // Repost author
+          title: plan.title, // Original post title
+          description: plan.description, // Original post description
+          media: plan.media,
+          tags: plan.category_sub,
+          timestamp: repost.created_at, // Repost timestamp
+          location: plan.location_coordinates || plan.location_text,
+          is_active: plan.is_live,
+          interaction_count: plan.interaction_count,
+          is_repost: true,
+          repost_data: {
+            repost_id: repost.repost_id,
+            added_content: repost.added_content,
+            original_plan_id: repost.original_plan_id,
+            original_author_id: plan.user_id,
+            cannot_be_reposted: repost.cannot_be_reposted
+          },
+          _rankingScore: plan._rankingScore
+        };
+      });
     
-    // Combine and sort by timestamp
-    const feed = [...regularFeed, ...repostFeed].sort((a, b) => 
-      new Date(b.timestamp) - new Date(a.timestamp)
-    ).slice(0, parseInt(limit));
+    // Combine regular feed and reposts, maintaining ranking order
+    // Interleave reposts into regular feed based on ranking scores
+    const combinedFeed = [...regularFeed, ...repostFeed];
+    combinedFeed.sort((a, b) => {
+      // Sort by ranking score if available, otherwise by timestamp
+      if (a._rankingScore !== undefined && b._rankingScore !== undefined) {
+        return b._rankingScore - a._rankingScore;
+      }
+      return new Date(b.timestamp) - new Date(a.timestamp);
+    });
     
-    return sendSuccess(res, 'Feed retrieved successfully', feed);
+    // Remove ranking scores from final output (optional, for cleaner API response)
+    const finalFeed = combinedFeed.slice(0, parseInt(limit)).map(item => {
+      const { _rankingScore, ...rest } = item;
+      return rest;
+    });
+    
+    return sendSuccess(res, 'Feed retrieved successfully', finalFeed);
   } catch (error) {
+    console.error('Error in getHomeFeed:', error);
     return sendError(res, error.message, 500);
   }
 };
