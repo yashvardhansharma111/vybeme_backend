@@ -118,12 +118,12 @@ exports.registerForEvent = async (req, res) => {
     // Get plan details for ticket display
     const planDetails = {
       plan_id: plan.plan_id,
-      title: plan.title,
-      description: plan.description,
-      location_text: plan.location_text,
-      date: plan.date,
-      time: plan.time,
-      media: plan.media
+      title: plan.title || '',
+      description: plan.description || '',
+      location_text: plan.location_text || null,
+      date: plan.date || null,
+      time: plan.time || null,
+      media: plan.media || []
     };
     
     return sendSuccess(res, 'Registration successful', {
