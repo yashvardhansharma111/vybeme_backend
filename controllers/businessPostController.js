@@ -1,4 +1,4 @@
-const { BusinessPlan } = require('../models');
+const { BusinessPlan, ChatGroup } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
 const { uploadImage, uploadVideo } = require('../config/cloudinary');
 const { cleanupFile } = require('../middleware/upload');
@@ -53,7 +53,32 @@ exports.createBusinessPost = async (req, res) => {
     delete planData.files;
     
     const plan = await BusinessPlan.create(planData);
-    return sendSuccess(res, 'Business post created successfully', { post_id: plan.plan_id }, 201);
+    
+    // Auto-create chat group for the business event
+    try {
+      const group = await ChatGroup.create({
+        group_id: generateId('group'),
+        plan_id: plan.plan_id,
+        created_by: plan.user_id,
+        members: [plan.user_id], // Business owner is automatically added
+        is_announcement_group: false,
+        group_name: plan.title || `Event: ${plan.plan_id}`
+      });
+      
+      // Update plan with group_id
+      plan.group_id = group.group_id;
+      await plan.save();
+      
+      console.log(`✅ Auto-created group ${group.group_id} for business plan ${plan.plan_id}`);
+    } catch (groupError) {
+      console.error('⚠️ Failed to auto-create group for business plan:', groupError);
+      // Continue even if group creation fails - don't block post creation
+    }
+    
+    return sendSuccess(res, 'Business post created successfully', { 
+      post_id: plan.plan_id,
+      group_id: plan.group_id 
+    }, 201);
   } catch (error) {
     // Cleanup any remaining files
     if (req.files) {

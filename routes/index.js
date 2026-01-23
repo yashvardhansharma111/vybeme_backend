@@ -19,6 +19,7 @@ const contactRoutes = require('./contactRoutes');
 const reportRoutes = require('./reportRoutes');
 const savedPostRoutes = require('./savedPostRoutes');
 const uploadRoutes = require('./uploadRoutes');
+const ticketRoutes = require('./ticketRoutes');
 
 // API routes
 router.use('/auth', authRoutes);
@@ -41,6 +42,7 @@ router.use('/map', mapRoutes);
 router.use('/contacts', contactRoutes);
 router.use('/user', reportRoutes);
 router.use('/post', savedPostRoutes);
+router.use('/ticket', ticketRoutes);
 
 // Health check
 router.get('/health', (req, res) => {

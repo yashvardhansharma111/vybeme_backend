@@ -116,6 +116,10 @@ const businessPlanSchema = new mongoose.Schema({
   event_production: {
     type: [String],
     default: [] // e.g., ["Musician", "Content Creator"]
+  },
+  group_id: {
+    type: String,
+    default: null // Auto-created chat group for the event
   }
 });
 

@@ -116,6 +116,7 @@ exports.getHomeFeed = async (req, res) => {
           interaction_count: plan.interaction_count,
           is_repost: false,
           cannot_be_reposted: isReposted,
+          type: plan.type || 'regular', // Include plan type (business or regular)
           // Include ranking score for debugging (optional, can remove in production)
           _rankingScore: plan._rankingScore
         };
@@ -138,6 +139,7 @@ exports.getHomeFeed = async (req, res) => {
           is_active: plan.is_live,
           interaction_count: plan.interaction_count,
           is_repost: true,
+          type: plan.type || 'regular', // Include plan type (business or regular)
           repost_data: {
             repost_id: repost.repost_id,
             added_content: repost.added_content,
@@ -203,7 +205,8 @@ exports.refreshFeed = async (req, res) => {
       timestamp: plan.created_at,
       location: plan.location_coordinates || plan.location_text,
       is_active: plan.is_live,
-      interaction_count: plan.interaction_count
+      interaction_count: plan.interaction_count,
+      type: plan.type || 'regular' // Include plan type (business or regular)
     }));
     
     return sendSuccess(res, 'Feed refreshed successfully', feed);
