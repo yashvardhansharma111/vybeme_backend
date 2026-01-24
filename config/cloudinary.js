@@ -39,29 +39,54 @@ const generateObjectKey = (file, folder = 'vybeme/posts') => {
 
 /**
  * Get file metadata (dimensions, size, format)
+ * Supports both file buffer (memoryStorage) and file path (diskStorage)
  */
-const getFileMetadata = async (filePath, mimetype) => {
-  const stats = fs.statSync(filePath);
-  const size = stats.size;
-  
-  // Try to get image dimensions if it's an image
+const getFileMetadata = async (file, mimetype) => {
+  let size = null;
   let width = null;
   let height = null;
   let format = null;
   
+  // Get file size
+  if (file.buffer) {
+    // Memory storage - use buffer
+    size = file.buffer.length;
+  } else if (file.path) {
+    // Disk storage - read from file
+    const stats = fs.statSync(file.path);
+    size = stats.size;
+  } else if (file.size) {
+    // Fallback to file.size if available
+    size = file.size;
+  }
+  
+  // Try to get image dimensions if it's an image
   if (mimetype && mimetype.startsWith('image/')) {
     try {
       const sharp = require('sharp');
-      const metadata = await sharp(filePath).metadata();
-      width = metadata.width;
-      height = metadata.height;
-      format = metadata.format;
+      let metadata;
+      
+      if (file.buffer) {
+        // Use buffer directly (faster)
+        metadata = await sharp(file.buffer).metadata();
+      } else if (file.path) {
+        // Read from disk
+        metadata = await sharp(file.path).metadata();
+      }
+      
+      if (metadata) {
+        width = metadata.width;
+        height = metadata.height;
+        format = metadata.format;
+      }
     } catch (error) {
-      // If sharp is not available or fails, extract format from mimetype
+      // If sharp fails, extract format from mimetype
       format = mimetype.split('/')[1]?.split('+')[0] || 'unknown';
     }
   } else if (mimetype && mimetype.startsWith('video/')) {
     format = mimetype.split('/')[1] || 'unknown';
+    // Note: Video duration would require ffmpeg - not implemented
+    // Duration field removed from return value
   }
   
   return { width, height, format, size };
@@ -69,10 +94,22 @@ const getFileMetadata = async (filePath, mimetype) => {
 
 /**
  * Upload file to Cloudflare R2
+ * Optimized to use file.buffer if available (memoryStorage), otherwise reads from disk
  */
 const uploadFile = async (file, folder = 'vybeme/posts', isVideo = false) => {
   try {
-    const fileBuffer = fs.readFileSync(file.path);
+    // Use buffer if available (memoryStorage - faster), otherwise read from disk
+    let fileBuffer;
+    if (file.buffer) {
+      // Memory storage - use buffer directly (faster, no disk I/O)
+      fileBuffer = file.buffer;
+    } else if (file.path) {
+      // Disk storage - read from file
+      fileBuffer = fs.readFileSync(file.path);
+    } else {
+      throw new Error('File buffer or path is required');
+    }
+    
     const objectKey = generateObjectKey(file, folder);
     const contentType = file.mimetype || (isVideo ? 'video/mp4' : 'image/jpeg');
     
@@ -86,8 +123,8 @@ const uploadFile = async (file, folder = 'vybeme/posts', isVideo = false) => {
     
     await s3Client.send(command);
     
-    // Get file metadata
-    const metadata = await getFileMetadata(file.path, file.mimetype);
+    // Get file metadata (supports both buffer and file path)
+    const metadata = await getFileMetadata(file, file.mimetype);
     
     // Generate public URL
     const url = getPublicUrl(objectKey);
@@ -99,7 +136,7 @@ const uploadFile = async (file, folder = 'vybeme/posts', isVideo = false) => {
       height: metadata.height,
       format: metadata.format,
       bytes: metadata.size,
-      duration: isVideo ? metadata.duration : undefined,
+      // Note: duration removed - would require ffmpeg to calculate
     };
   } catch (error) {
     throw new Error(`R2 upload failed: ${error.message}`);
@@ -152,7 +189,6 @@ module.exports = {
   uploadProfileImage,
   deleteFile,
   s3Client, // Export S3 client for advanced usage
-  // Export as 'cloudinary' for any code that might reference it
-  cloudinary: s3Client
+  // Note: cloudinary export removed - would be misleading and could break if code uses cloudinary.uploader.upload()
 };
 

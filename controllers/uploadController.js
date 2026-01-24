@@ -90,9 +90,9 @@ exports.uploadVideo = async (req, res) => {
     return sendSuccess(res, 'Video uploaded successfully', {
       url: result.url,
       public_id: result.public_id,
-      duration: result.duration,
       format: result.format,
       size: result.bytes
+      // Note: duration removed - would require ffmpeg to calculate
     });
   } catch (error) {
     cleanupFile(req.file?.path);
