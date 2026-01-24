@@ -1,89 +1,158 @@
-const cloudinary = require('cloudinary').v2;
+// Cloudflare R2 Service (replaces Cloudinary)
+// This file maintains the same interface as Cloudinary for backward compatibility
+const { S3Client, PutObjectCommand, DeleteObjectCommand } = require('@aws-sdk/client-s3');
+const fs = require('fs');
+const path = require('path');
 require('dotenv').config();
 
-// Configure Cloudinary
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'your-cloud-name',
-  api_key: process.env.CLOUDINARY_API_KEY || 'your-api-key',
-  api_secret: process.env.CLOUDINARY_API_SECRET || 'your-api-secret'
+// Configure S3 client for Cloudflare R2
+const s3Client = new S3Client({
+  region: 'auto',
+  endpoint: process.env.R2_ENDPOINT || 'https://360d354bdeeeebd56dc20490be698f7f.r2.cloudflarestorage.com',
+  credentials: {
+    accessKeyId: process.env.R2_ACCESS_KEY_ID || '59c0252f5df88e91e02def741da5e0c4',
+    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY || 'ecae584323e91b35d59d7a0dc23e9f216ac8d72eceecca700c25556e68ffa76b',
+  },
 });
 
+const BUCKET_NAME = process.env.R2_BUCKET_NAME || 'vybeme-images';
+const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID || '360d354bdeeeebd56dc20490be698f7f';
+const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || `https://pub-${R2_ACCOUNT_ID}.r2.dev/${BUCKET_NAME}`;
+
 /**
- * Upload image to Cloudinary
+ * Generate public URL for an object
+ */
+const getPublicUrl = (key) => {
+  return `${R2_PUBLIC_URL}/${key}`;
+};
+
+/**
+ * Generate object key from folder and filename
+ */
+const generateObjectKey = (file, folder = 'vybeme/posts') => {
+  const timestamp = Date.now();
+  const randomString = Math.random().toString(36).substring(2, 15);
+  const ext = path.extname(file.originalname || '');
+  const filename = `${timestamp}-${randomString}${ext}`;
+  return `${folder}/${filename}`;
+};
+
+/**
+ * Get file metadata (dimensions, size, format)
+ */
+const getFileMetadata = async (filePath, mimetype) => {
+  const stats = fs.statSync(filePath);
+  const size = stats.size;
+  
+  // Try to get image dimensions if it's an image
+  let width = null;
+  let height = null;
+  let format = null;
+  
+  if (mimetype && mimetype.startsWith('image/')) {
+    try {
+      const sharp = require('sharp');
+      const metadata = await sharp(filePath).metadata();
+      width = metadata.width;
+      height = metadata.height;
+      format = metadata.format;
+    } catch (error) {
+      // If sharp is not available or fails, extract format from mimetype
+      format = mimetype.split('/')[1]?.split('+')[0] || 'unknown';
+    }
+  } else if (mimetype && mimetype.startsWith('video/')) {
+    format = mimetype.split('/')[1] || 'unknown';
+  }
+  
+  return { width, height, format, size };
+};
+
+/**
+ * Upload file to Cloudflare R2
+ */
+const uploadFile = async (file, folder = 'vybeme/posts', isVideo = false) => {
+  try {
+    const fileBuffer = fs.readFileSync(file.path);
+    const objectKey = generateObjectKey(file, folder);
+    const contentType = file.mimetype || (isVideo ? 'video/mp4' : 'image/jpeg');
+    
+    // Upload to R2
+    const command = new PutObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: objectKey,
+      Body: fileBuffer,
+      ContentType: contentType,
+    });
+    
+    await s3Client.send(command);
+    
+    // Get file metadata
+    const metadata = await getFileMetadata(file.path, file.mimetype);
+    
+    // Generate public URL
+    const url = getPublicUrl(objectKey);
+    
+    return {
+      url: url,
+      public_id: objectKey, // Use object key as public_id for compatibility
+      width: metadata.width,
+      height: metadata.height,
+      format: metadata.format,
+      bytes: metadata.size,
+      duration: isVideo ? metadata.duration : undefined,
+    };
+  } catch (error) {
+    throw new Error(`R2 upload failed: ${error.message}`);
+  }
+};
+
+/**
+ * Upload image to R2 (maintains Cloudinary interface)
  */
 const uploadImage = async (file, folder = 'vybeme/posts') => {
-  try {
-    const result = await cloudinary.uploader.upload(file.path, {
-      folder: folder,
-      resource_type: 'auto',
-      transformation: [
-        { width: 1200, height: 1200, crop: 'limit', quality: 'auto' },
-        { fetch_format: 'auto' }
-      ]
-    });
-    
-    return {
-      url: result.secure_url,
-      public_id: result.public_id,
-      width: result.width,
-      height: result.height,
-      format: result.format,
-      bytes: result.bytes
-    };
-  } catch (error) {
-    throw new Error(`Cloudinary upload failed: ${error.message}`);
-  }
+  return uploadFile(file, folder, false);
 };
 
 /**
- * Upload video to Cloudinary
+ * Upload video to R2 (maintains Cloudinary interface)
  */
 const uploadVideo = async (file, folder = 'vybeme/videos') => {
-  try {
-    const result = await cloudinary.uploader.upload(file.path, {
-      folder: folder,
-      resource_type: 'video',
-      transformation: [
-        { quality: 'auto' }
-      ]
-    });
-    
-    return {
-      url: result.secure_url,
-      public_id: result.public_id,
-      duration: result.duration,
-      format: result.format,
-      bytes: result.bytes
-    };
-  } catch (error) {
-    throw new Error(`Cloudinary upload failed: ${error.message}`);
-  }
+  return uploadFile(file, folder, true);
 };
 
 /**
- * Delete file from Cloudinary
- */
-const deleteFile = async (publicId) => {
-  try {
-    const result = await cloudinary.uploader.destroy(publicId);
-    return result;
-  } catch (error) {
-    throw new Error(`Cloudinary delete failed: ${error.message}`);
-  }
-};
-
-/**
- * Upload profile image
+ * Upload profile image (maintains Cloudinary interface)
  */
 const uploadProfileImage = async (file) => {
   return uploadImage(file, 'vybeme/profiles');
 };
 
+/**
+ * Delete file from R2 (maintains Cloudinary interface)
+ * @param {string} objectKey - The object key (formerly public_id)
+ */
+const deleteFile = async (objectKey) => {
+  try {
+    const command = new DeleteObjectCommand({
+      Bucket: BUCKET_NAME,
+      Key: objectKey,
+    });
+    
+    const result = await s3Client.send(command);
+    return { result: 'ok' };
+  } catch (error) {
+    throw new Error(`R2 delete failed: ${error.message}`);
+  }
+};
+
+// Export with same interface as Cloudinary for backward compatibility
 module.exports = {
   uploadImage,
   uploadVideo,
   uploadProfileImage,
   deleteFile,
-  cloudinary
+  s3Client, // Export S3 client for advanced usage
+  // Export as 'cloudinary' for any code that might reference it
+  cloudinary: s3Client
 };
 
