@@ -30,6 +30,7 @@ router.use('/feed', feedRoutes);
 router.use('/post', postRoutes);
 router.use('/plan', planRoutes);
 router.use('/business', businessPostRoutes);
+router.use('/business-post', businessPostRoutes); // Alias for consistency with frontend
 router.use('/repost', repostRoutes);
 // Interaction routes (comments, reactions, join) - using /post prefix
 router.use('/post', interactionRoutes);

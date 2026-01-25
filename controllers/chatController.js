@@ -493,19 +493,67 @@ exports.getChatLists = async (req, res) => {
     }
     
     // Get all groups where user is a member (including individual chats)
-    const userGroups = await ChatGroup.find({
-      members: user_id,
+    // Try multiple query approaches to ensure we find the groups
+    let userGroups = await ChatGroup.find({
+      members: user_id, // MongoDB automatically checks if value is in array
       is_closed: false
     }).lean();
     
+    // If no groups found, try alternative query
+    if (userGroups.length === 0) {
+      userGroups = await ChatGroup.find({
+        members: { $in: [user_id] },
+        is_closed: false
+      }).lean();
+    }
+    
     console.log(`📋 Found ${userGroups.length} groups for user ${user_id}`);
+    
+    // Debug: Check all groups to see what's in the database
+    const allGroups = await ChatGroup.find({ is_closed: false }).lean();
+    console.log(`🔍 Total groups in database: ${allGroups.length}`);
+    if (allGroups.length > 0) {
+      allGroups.forEach(g => {
+        const isMember = g.members && g.members.includes(user_id);
+        console.log(`  - Group ${g.group_id}: plan_id=${g.plan_id}, members=[${(g.members || []).join(', ')}], group_name="${g.group_name}", user_is_member=${isMember}`);
+      });
+    } else {
+      console.log(`  ⚠️ No groups found in database at all!`);
+    }
+    
+    // Also check if user_id matches any created_by
+    const groupsCreatedByUser = await ChatGroup.find({
+      created_by: user_id,
+      is_closed: false
+    }).lean();
+    console.log(`🔍 Groups created by user ${user_id}: ${groupsCreatedByUser.length}`);
+    if (groupsCreatedByUser.length > 0) {
+      groupsCreatedByUser.forEach(g => {
+        const membersList = (g.members || []).map(m => `${m} (${typeof m})`).join(', ');
+        console.log(`  - Created group ${g.group_id}: members=[${membersList}], user_id type=${typeof user_id}`);
+        // Manually check if user_id is in members
+        const manuallyCheck = (g.members || []).some(m => String(m) === String(user_id));
+        console.log(`    Manual check (String comparison): user is member = ${manuallyCheck}`);
+      });
+    }
+    
+    // Try a direct query to see if we can find groups with this user_id as a string
+    console.log(`🔍 Querying with user_id as string: "${String(user_id)}"`);
+    const testQuery = await ChatGroup.find({
+      $expr: { $in: [String(user_id), { $map: { input: "$members", as: "m", in: { $toString: "$$m" } } }] },
+      is_closed: false
+    }).lean();
+    console.log(`🔍 Found ${testQuery.length} groups using $expr query`);
     
     // Get all plans where user is a member of a group
     const planIds = userGroups.map(g => g.plan_id);
     const plans = await BasePlan.find({
       plan_id: { $in: planIds },
-      deleted_at: null
+      deleted_at: null,
+      post_status: { $ne: 'deleted' } // Exclude deleted plans, but include all other statuses
     }).lean();
+    
+    console.log(`📋 Found ${plans.length} plans for ${planIds.length} groups`);
     
     // Separate into "Their Plans" (plans created by others) and "My Plans" (plans created by user)
     const theirPlans = [];
@@ -514,7 +562,12 @@ exports.getChatLists = async (req, res) => {
     
     for (const group of userGroups) {
       const plan = plans.find(p => p.plan_id === group.plan_id);
-      if (!plan) continue;
+      if (!plan) {
+        console.log(`⚠️ Group ${group.group_id} has plan_id ${group.plan_id} but plan not found in database`);
+        continue;
+      }
+      
+      console.log(`✅ Processing group ${group.group_id} for plan ${plan.plan_id} (type: ${plan.type}, members: ${group.members.length})`);
       
       // Get last message
       const lastMessage = await ChatMessage.findOne({ group_id: group.group_id })
@@ -559,17 +612,39 @@ exports.getChatLists = async (req, res) => {
         group_name: group.group_name || (group.members.length === 2 && otherUser ? otherUser.name : plan.title)
       };
       
+      // Check if this is a business plan - business plan groups should always be in "groups" section
+      const isBusinessPlan = plan.type === 'business';
+      
       // Individual chats (2 members) go to their_plans or my_plans
       // Group chats (3+ members) go to groups
-      if (group.members.length === 2) {
+      // Business plan groups always go to groups, regardless of member count
+      // Groups with 1 member (creator only) also go to groups or my_plans
+      if (isBusinessPlan) {
+        // Business plan groups always go to groups section
+        groups.push({
+          ...chatItem,
+          members: group.members
+        });
+      } else if (group.members.length === 2) {
         // Individual chat - determine if it's "my plan" or "their plan"
         if (plan.user_id === user_id) {
           myPlans.push(chatItem);
         } else {
           theirPlans.push(chatItem);
         }
+      } else if (group.members.length === 1) {
+        // Single member group (usually business plan creator) - add to my_plans if user is creator, otherwise to groups
+        if (plan.user_id === user_id) {
+          myPlans.push(chatItem);
+        } else {
+          // Shouldn't happen, but handle it
+          groups.push({
+            ...chatItem,
+            members: group.members
+          });
+        }
       } else {
-        // Group chat - add to groups list
+        // Group chat (3+ members) - add to groups list
         groups.push({
           ...chatItem,
           members: group.members

@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { Ticket, Registration, BusinessPlan, User } = require('../models');
+const { Ticket, Registration, BusinessPlan, User, ChatGroup } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
 
 /**
@@ -110,6 +110,80 @@ exports.registerForEvent = async (req, res) => {
         { plan_id },
         { $inc: { approved_registrations: 1 } }
       );
+    }
+    
+    // Add user to the business event group immediately upon registration
+    // This happens regardless of approval status as per user requirement
+    if (plan.group_id) {
+      try {
+        const group = await ChatGroup.findOne({ group_id: plan.group_id });
+        if (!group) {
+          console.error(`⚠️ Group ${plan.group_id} not found for business plan ${plan_id}`);
+        } else {
+          console.log(`🔍 Group found: ${group.group_id}, current members: [${(group.members || []).join(', ')}]`);
+          if (!group.members || !group.members.includes(user_id)) {
+            if (!group.members) {
+              group.members = [];
+            }
+            group.members.push(user_id);
+            const savedGroup = await group.save();
+            
+            // Verify the save worked
+            const verifyGroup = await ChatGroup.findOne({ group_id: plan.group_id }).lean();
+            console.log(`✅ Added user ${user_id} to group ${plan.group_id} for business plan ${plan_id}`);
+            console.log(`   - Group now has ${savedGroup.members.length} members: [${savedGroup.members.join(', ')}]`);
+            console.log(`   - Verified in DB: members=[${(verifyGroup?.members || []).join(', ')}]`);
+          } else {
+            console.log(`ℹ️ User ${user_id} is already a member of group ${plan.group_id}`);
+          }
+        }
+      } catch (groupError) {
+        console.error('⚠️ Failed to add user to group:', groupError);
+        // Continue even if adding to group fails - don't block registration
+      }
+    } else {
+      console.error(`⚠️ Business plan ${plan_id} has no group_id - creating group now`);
+      // Fallback: Create group if it doesn't exist (for plans created before this feature)
+      try {
+        const { ChatGroup } = require('../models');
+        const { generateId } = require('../utils');
+        
+        const newGroup = await ChatGroup.create({
+          group_id: generateId('group'),
+          plan_id: plan.plan_id,
+          created_by: plan.user_id,
+          members: [plan.user_id, user_id], // Add both business owner and registering user
+          is_announcement_group: false,
+          group_name: plan.title || `Event: ${plan.plan_id}`
+        });
+        
+        // Update plan with group_id
+        await BusinessPlan.updateOne(
+          { plan_id: plan.plan_id },
+          { $set: { group_id: newGroup.group_id } }
+        );
+        
+        // Post welcome message
+        const { ChatMessage, BasePlan } = require('../models');
+        await ChatMessage.create({
+          message_id: generateId('msg'),
+          group_id: newGroup.group_id,
+          user_id: plan.user_id,
+          type: 'text',
+          content: `Welcome to the group for ${plan.title}`,
+          reactions: []
+        });
+        
+        await BasePlan.updateOne(
+          { plan_id: plan.plan_id },
+          { $inc: { chat_message_count: 1 } }
+        );
+        
+        console.log(`✅ Created missing group ${newGroup.group_id} for business plan ${plan_id}`);
+        console.log(`   - Added user ${user_id} to the new group`);
+      } catch (fallbackError) {
+        console.error('⚠️ Failed to create fallback group:', fallbackError);
+      }
     }
     
     // Get user details for response
