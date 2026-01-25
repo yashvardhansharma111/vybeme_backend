@@ -17,7 +17,9 @@ const s3Client = new S3Client({
 
 const BUCKET_NAME = process.env.R2_BUCKET_NAME || 'vybeme-images';
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID || '360d354bdeeeebd56dc20490be698f7f';
-const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || `https://pub-${R2_ACCOUNT_ID}.r2.dev/${BUCKET_NAME}`;
+// R2_PUBLIC_URL should NOT include bucket name - bucket is implied in R2.dev URLs
+// Format: https://pub-{account-id}.r2.dev (without /bucket-name)
+const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || `https://pub-${R2_ACCOUNT_ID}.r2.dev`;
 
 /**
  * Generate public URL for an object
