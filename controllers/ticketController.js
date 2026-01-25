@@ -197,7 +197,8 @@ exports.registerForEvent = async (req, res) => {
       location_text: plan.location_text || null,
       date: plan.date || null,
       time: plan.time || null,
-      media: plan.media || []
+      media: plan.media || [],
+      ticket_image: plan.ticket_image || null // Use ticket-specific image if available
     };
     
     return sendSuccess(res, 'Registration successful', {
@@ -260,7 +261,8 @@ exports.getUserTicket = async (req, res) => {
           location_text: plan.location_text,
           date: plan.date,
           time: plan.time,
-          media: plan.media
+          media: plan.media,
+          ticket_image: plan.ticket_image || null
         } : null,
         user: user ? {
           user_id: user.user_id,
@@ -299,7 +301,8 @@ exports.getTicketById = async (req, res) => {
           location_text: plan.location_text,
           date: plan.date,
           time: plan.time,
-          media: plan.media
+          media: plan.media,
+          ticket_image: plan.ticket_image || null
         } : null,
         user: user ? {
           user_id: user.user_id,

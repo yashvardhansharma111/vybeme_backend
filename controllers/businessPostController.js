@@ -10,10 +10,12 @@ const { cleanupFile } = require('../middleware/upload');
 exports.createBusinessPost = async (req, res) => {
   try {
     let media = [];
+    let ticketImageUrl = null;
     
-    // Handle file uploads if present
-    if (req.files && req.files.length > 0) {
-      const uploadPromises = req.files.map(async (file) => {
+    // Handle post media file uploads if present
+    const postMediaFiles = req.files?.files || [];
+    if (postMediaFiles.length > 0) {
+      const uploadPromises = postMediaFiles.map(async (file) => {
         try {
           const isVideo = file.mimetype.startsWith('video/');
           const result = isVideo 
@@ -39,11 +41,29 @@ exports.createBusinessPost = async (req, res) => {
       media = req.body.media;
     }
     
+    // Handle ticket image upload if present
+    const ticketImageFile = req.files?.ticket_image?.[0];
+    if (ticketImageFile) {
+      try {
+        const result = await uploadImage(ticketImageFile, 'vybeme/tickets');
+        ticketImageUrl = result.url;
+        cleanupFile(ticketImageFile.path);
+      } catch (error) {
+        cleanupFile(ticketImageFile.path);
+        // Don't fail the whole request if ticket image upload fails
+        console.error('Ticket image upload failed:', error);
+      }
+    } else if (req.body.ticket_image) {
+      // Use provided ticket image URL
+      ticketImageUrl = req.body.ticket_image;
+    }
+    
     const planData = {
       plan_id: generateId('plan'),
       ...req.body,
       media: media,
       media_count: media.length,
+      ticket_image: ticketImageUrl,
       type: 'business',
       post_status: 'published',
       posted_at: new Date()
@@ -171,9 +191,10 @@ exports.updateBusinessPost = async (req, res) => {
       return sendError(res, 'Business post not found', 404);
     }
     
-    // Handle file uploads if present
-    if (req.files && req.files.length > 0) {
-      const uploadPromises = req.files.map(async (file) => {
+    // Handle post media file uploads if present
+    const postMediaFiles = req.files?.files || [];
+    if (postMediaFiles.length > 0) {
+      const uploadPromises = postMediaFiles.map(async (file) => {
         try {
           const isVideo = file.mimetype.startsWith('video/');
           const result = isVideo 
@@ -196,6 +217,22 @@ exports.updateBusinessPost = async (req, res) => {
       const newMedia = await Promise.all(uploadPromises);
       updateData.media = [...(plan.media || []), ...newMedia];
       updateData.media_count = updateData.media.length;
+    }
+    
+    // Handle ticket image upload if present
+    const ticketImageFile = req.files?.ticket_image?.[0];
+    if (ticketImageFile) {
+      try {
+        const result = await uploadImage(ticketImageFile, 'vybeme/tickets');
+        updateData.ticket_image = result.url;
+        cleanupFile(ticketImageFile.path);
+      } catch (error) {
+        cleanupFile(ticketImageFile.path);
+        console.error('Ticket image upload failed:', error);
+      }
+    } else if (req.body.ticket_image !== undefined) {
+      // Allow updating ticket image URL directly
+      updateData.ticket_image = req.body.ticket_image;
     }
     
     // Remove files from update data

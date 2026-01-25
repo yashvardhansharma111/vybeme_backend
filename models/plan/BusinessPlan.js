@@ -120,6 +120,10 @@ const businessPlanSchema = new mongoose.Schema({
   group_id: {
     type: String,
     default: null // Auto-created chat group for the event
+  },
+  ticket_image: {
+    type: String,
+    default: null // Separate image for ticket display (different from post media)
   }
 });
 
