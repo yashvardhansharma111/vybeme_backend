@@ -37,7 +37,9 @@ exports.getNotifications = async (req, res) => {
             plan_id: post.plan_id,
             title: post.title,
             description: post.description,
-            media: post.media || []
+            media: post.media || [],
+            category_main: post.category_main || null,
+            category_sub: post.category_sub || []
           };
         }
       }

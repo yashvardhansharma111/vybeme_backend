@@ -6,29 +6,28 @@ const { sendSuccess, sendError, generateId } = require('../utils');
  */
 exports.createRepost = async (req, res) => {
   try {
-    const { original_plan_id, added_content, repost_author_id } = req.body;
+    const { original_plan_id, added_content, repost_author_id, repost_title, repost_description } = req.body;
     
     if (!original_plan_id || !repost_author_id) {
       return sendError(res, 'original_plan_id and repost_author_id are required', 400);
     }
     
-    // Check if original post exists
+    // Check if original post exists (must be a BasePlan, not a repost_id)
     const originalPlan = await BasePlan.findOne({ plan_id: original_plan_id });
     if (!originalPlan) {
       return sendError(res, 'Original post not found', 404);
     }
     
-    // Check if original post is a repost (cannot repost a repost)
-    const originalRepost = await Repost.findOne({ original_plan_id });
-    if (originalRepost) {
-      return sendError(res, 'Cannot repost a repost', 400);
-    }
+    // Allow multiple reposts of the same plan (each user can repost). Only block if this plan_id
+    // were a repost record id - but reposts don't create new plans, so original_plan_id is always a real plan.
     
     const repost = await Repost.create({
       repost_id: generateId('repost'),
       original_plan_id,
       repost_author_id,
       added_content: added_content || '',
+      repost_title: repost_title || '',
+      repost_description: repost_description || '',
       cannot_be_reposted: true
     });
     
@@ -46,7 +45,7 @@ exports.createRepost = async (req, res) => {
         type: 'repost',
         source_plan_id: original_plan_id,
         source_user_id: repost_author_id,
-        payload: { repost_id: repost.repost_id, added_content },
+        payload: { repost_id: repost.repost_id, added_content, repost_title, repost_description },
         is_read: false
       });
     }

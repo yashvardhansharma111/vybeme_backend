@@ -130,8 +130,8 @@ exports.getHomeFeed = async (req, res) => {
         return {
           post_id: repost.repost_id, // Use repost_id as the post_id for reposts
           user_id: repost.repost_author_id, // Repost author
-          title: plan.title, // Original post title
-          description: plan.description, // Original post description
+          title: repost.repost_title || plan.title, // Reposter's title, else original
+          description: repost.repost_description || plan.description, // Reposter's description, else original
           media: plan.media,
           tags: plan.category_sub,
           timestamp: repost.created_at, // Repost timestamp
@@ -143,6 +143,8 @@ exports.getHomeFeed = async (req, res) => {
           repost_data: {
             repost_id: repost.repost_id,
             added_content: repost.added_content,
+            repost_title: repost.repost_title,
+            repost_description: repost.repost_description,
             original_plan_id: repost.original_plan_id,
             original_author_id: plan.user_id,
             cannot_be_reposted: repost.cannot_be_reposted

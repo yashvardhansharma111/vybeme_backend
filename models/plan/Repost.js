@@ -18,6 +18,14 @@ const repostSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  repost_title: {
+    type: String,
+    default: ''
+  },
+  repost_description: {
+    type: String,
+    default: ''
+  },
   created_at: {
     type: Date,
     default: Date.now
