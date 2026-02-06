@@ -347,30 +347,39 @@ exports.scanQRCode = async (req, res) => {
     if (plan.user_id !== scanner_user_id && plan.business_id !== scanner_user_id) {
       return sendError(res, 'Only event organizer can check in attendees', 403);
     }
-    
+
+    const planInfo = {
+      plan_id: plan.plan_id,
+      title: plan.title,
+      date: plan.date,
+      time: plan.time,
+      location_text: plan.location_text
+    };
+
     // Check if already checked in
     if (ticket.checked_in) {
       const user = await User.findOne({ user_id: ticket.user_id }).lean();
+      const [checkedInCount, totalCount] = await Promise.all([
+        Registration.countDocuments({ plan_id: ticket.plan_id, checked_in: true }),
+        Registration.countDocuments({ plan_id: ticket.plan_id, status: { $in: ['pending', 'approved'] } })
+      ]);
       return sendSuccess(res, 'Already checked in', {
-        ticket: {
-          ...ticket.toObject(),
-          plan_id: ticket.plan_id // Include plan_id in response
-        },
-        user: user ? {
-          user_id: user.user_id,
-          name: user.name,
-          profile_image: user.profile_image
-        } : null,
+        ticket: { ...ticket.toObject(), plan_id: ticket.plan_id },
+        plan: planInfo,
+        user: user ? { user_id: user.user_id, name: user.name, profile_image: user.profile_image } : null,
+        attendee: user ? { user_id: user.user_id, name: user.name, profile_image: user.profile_image } : null,
+        checked_in_count: checkedInCount,
+        total: totalCount,
         already_checked_in: true
       });
     }
-    
+
     // Check in the user
     ticket.checked_in = true;
     ticket.checked_in_at = new Date();
     ticket.checked_in_by = scanner_user_id;
     await ticket.save();
-    
+
     // Update registration
     const registration = await Registration.findOne({ ticket_id: ticket.ticket_id });
     if (registration) {
@@ -379,20 +388,31 @@ exports.scanQRCode = async (req, res) => {
       registration.checked_in_by = scanner_user_id;
       await registration.save();
     }
-    
+
     // Get user details
     const user = await User.findOne({ user_id: ticket.user_id }).lean();
-    
+
+    // Check-in counts for this event (for scanner UI)
+    const [checkedInCount, totalCount] = await Promise.all([
+      Registration.countDocuments({ plan_id: ticket.plan_id, checked_in: true }),
+      Registration.countDocuments({ plan_id: ticket.plan_id, status: { $in: ['pending', 'approved'] } })
+    ]);
+
     return sendSuccess(res, 'Check-in successful', {
-      ticket: {
-        ...ticket.toObject(),
-        plan_id: ticket.plan_id // Include plan_id in response
-      },
+      ticket: { ...ticket.toObject(), plan_id: ticket.plan_id },
+      plan: planInfo,
       user: user ? {
         user_id: user.user_id,
         name: user.name,
         profile_image: user.profile_image
       } : null,
+      attendee: user ? {
+        user_id: user.user_id,
+        name: user.name,
+        profile_image: user.profile_image
+      } : null,
+      checked_in_count: checkedInCount,
+      total: totalCount,
       already_checked_in: false
     });
   } catch (error) {

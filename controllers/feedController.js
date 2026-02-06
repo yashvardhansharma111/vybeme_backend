@@ -42,15 +42,20 @@ exports.getHomeFeed = async (req, res) => {
     if (user_id) {
       user = await User.findOne({ user_id }).lean();
     }
-    
+
+    // Women-only posts: show only to users with gender === 'female'; hide from male, other, and guests
+    const isViewerFemale = user && (user.gender || '').toLowerCase() === 'female';
+    let plansFiltered = plans.filter((p) => {
+      if (!p.is_women_only) return true;
+      return isViewerFemale;
+    });
+
     // Apply ranking algorithm
     let rankedPlans;
     if (user) {
-      // Registered user: use personalized ranking
-      rankedPlans = rankPlansForUser(plans, user);
+      rankedPlans = rankPlansForUser(plansFiltered, user);
     } else {
-      // Guest user: use guest ranking
-      rankedPlans = rankPlansForGuest(plans);
+      rankedPlans = rankPlansForGuest(plansFiltered);
     }
     
     // Check which posts are reposts
@@ -74,21 +79,21 @@ exports.getHomeFeed = async (req, res) => {
     const originalPlansMap = {};
     originalPlans.forEach(p => { originalPlansMap[p.plan_id] = p; });
     
-    // Rank reposts (using original plan data)
+    // Rank reposts (using original plan data); exclude women-only for non-female viewers
     const repostPlans = allReposts
       .map(repost => {
         const originalPlan = originalPlansMap[repost.original_plan_id];
         if (!originalPlan) return null;
-        // Use original plan data but repost timestamp for ranking
+        if (originalPlan.is_women_only && !isViewerFemale) return null;
         return {
           ...originalPlan,
-          created_at: repost.created_at, // Use repost timestamp for recency
+          created_at: repost.created_at,
           _isRepost: true,
           _repostData: repost
         };
       })
       .filter(Boolean);
-    
+
     let rankedReposts = [];
     if (repostPlans.length > 0) {
       if (user) {
