@@ -1,7 +1,21 @@
 const { BusinessPlan, ChatGroup, ChatMessage, BasePlan } = require('../models');
+const CategoryTag = require('../models/other/CategoryTag');
 const { sendSuccess, sendError, generateId } = require('../utils');
 const { uploadImage, uploadVideo } = require('../config/cloudinary');
 const { cleanupFile } = require('../middleware/upload');
+
+// req.files from multer.fields() is an object { files: [...], ticket_image: [...] }, not an array
+function getAllFiles(files) {
+  if (!files) return [];
+  if (Array.isArray(files)) return files;
+  if (typeof files === 'object') return Object.values(files).flat().filter(Boolean);
+  return [];
+}
+
+function ensureArray(val) {
+  if (Array.isArray(val)) return val;
+  return val != null ? [val] : [];
+}
 
 /**
  * Create business post
@@ -12,8 +26,8 @@ exports.createBusinessPost = async (req, res) => {
     let media = [];
     let ticketImageUrl = null;
     
-    // Handle post media file uploads if present
-    const postMediaFiles = req.files?.files || [];
+    // Handle post media file uploads if present (req.files.files can be array or single file)
+    const postMediaFiles = ensureArray(req.files?.files);
     if (postMediaFiles.length > 0) {
       const uploadPromises = postMediaFiles.map(async (file) => {
         try {
@@ -42,7 +56,8 @@ exports.createBusinessPost = async (req, res) => {
     }
     
     // Handle ticket image upload if present
-    const ticketImageFile = req.files?.ticket_image?.[0];
+    const ticketImageFiles = ensureArray(req.files?.ticket_image);
+    const ticketImageFile = ticketImageFiles[0];
     if (ticketImageFile) {
       try {
         const result = await uploadImage(ticketImageFile, 'vybeme/tickets');
@@ -58,9 +73,25 @@ exports.createBusinessPost = async (req, res) => {
       ticketImageUrl = req.body.ticket_image;
     }
     
+    const body = { ...req.body };
+    if (typeof body.category_sub === 'string') {
+      try { body.category_sub = JSON.parse(body.category_sub); } catch (_) { body.category_sub = []; }
+    }
+    if (!Array.isArray(body.category_sub)) body.category_sub = [];
+
+    // FormData sends all fields as strings; passes and add_details must be arrays of objects for Mongoose
+    if (typeof body.passes === 'string') {
+      try { body.passes = JSON.parse(body.passes); } catch (_) { body.passes = []; }
+    }
+    if (!Array.isArray(body.passes)) body.passes = [];
+    if (typeof body.add_details === 'string') {
+      try { body.add_details = JSON.parse(body.add_details); } catch (_) { body.add_details = []; }
+    }
+    if (!Array.isArray(body.add_details)) body.add_details = [];
+
     const planData = {
       plan_id: generateId('plan'),
-      ...req.body,
+      ...body,
       media: media,
       media_count: media.length,
       ticket_image: ticketImageUrl,
@@ -69,10 +100,37 @@ exports.createBusinessPost = async (req, res) => {
       posted_at: new Date()
     };
     
-    // Remove files from body if present
     delete planData.files;
     
     const plan = await BusinessPlan.create(planData);
+
+    // Category logic (main + sub) – same as normal plan posts: ensure CategoryTag exists
+    if (body.category_main) {
+      const mainCategory = String(body.category_main).toLowerCase().trim();
+      const subTags = Array.isArray(body.category_sub)
+        ? body.category_sub.map((s) => String(s).toLowerCase().trim())
+        : [];
+      let categoryDoc = await CategoryTag.findOne({ tag_name: mainCategory });
+      if (!categoryDoc) {
+        await CategoryTag.create({
+          tag_id: generateId('cat'),
+          tag_name: mainCategory,
+          sub_tags: subTags.map((sub) => ({
+            sub_tag_id: generateId('sub'),
+            sub_tag_name: sub,
+          })),
+        });
+      } else if (subTags.length > 0) {
+        const existingSubs = categoryDoc.sub_tags.map((s) => s.sub_tag_name);
+        const newSubs = subTags
+          .filter((sub) => !existingSubs.includes(sub))
+          .map((sub) => ({ sub_tag_id: generateId('sub'), sub_tag_name: sub }));
+        if (newSubs.length > 0) {
+          categoryDoc.sub_tags.push(...newSubs);
+          await categoryDoc.save();
+        }
+      }
+    }
     
     // Auto-create chat group for the business event
     try {
@@ -169,10 +227,8 @@ exports.createBusinessPost = async (req, res) => {
       group_id: finalPlan?.group_id || plan.group_id || null
     }, 201);
   } catch (error) {
-    // Cleanup any remaining files
-    if (req.files) {
-      req.files.forEach(file => cleanupFile(file.path));
-    }
+    const allFiles = getAllFiles(req.files);
+    allFiles.forEach((file) => file && file.path && cleanupFile(file.path));
     return sendError(res, error.message, 500);
   }
 };
@@ -185,14 +241,26 @@ exports.updateBusinessPost = async (req, res) => {
   try {
     const { post_id } = req.params;
     const updateData = { ...req.body };
-    
+    if (typeof updateData.category_sub === 'string') {
+      try { updateData.category_sub = JSON.parse(updateData.category_sub); } catch (_) { updateData.category_sub = []; }
+    }
+    if (updateData.category_sub && !Array.isArray(updateData.category_sub)) updateData.category_sub = [];
+    if (typeof updateData.passes === 'string') {
+      try { updateData.passes = JSON.parse(updateData.passes); } catch (_) { updateData.passes = []; }
+    }
+    if (updateData.passes !== undefined && !Array.isArray(updateData.passes)) updateData.passes = [];
+    if (typeof updateData.add_details === 'string') {
+      try { updateData.add_details = JSON.parse(updateData.add_details); } catch (_) { updateData.add_details = []; }
+    }
+    if (updateData.add_details !== undefined && !Array.isArray(updateData.add_details)) updateData.add_details = [];
+
     const plan = await BusinessPlan.findOne({ plan_id: post_id });
     if (!plan) {
       return sendError(res, 'Business post not found', 404);
     }
     
     // Handle post media file uploads if present
-    const postMediaFiles = req.files?.files || [];
+    const postMediaFiles = ensureArray(req.files?.files);
     if (postMediaFiles.length > 0) {
       const uploadPromises = postMediaFiles.map(async (file) => {
         try {
@@ -220,7 +288,8 @@ exports.updateBusinessPost = async (req, res) => {
     }
     
     // Handle ticket image upload if present
-    const ticketImageFile = req.files?.ticket_image?.[0];
+    const ticketImageFiles = ensureArray(req.files?.ticket_image);
+    const ticketImageFile = ticketImageFiles[0];
     if (ticketImageFile) {
       try {
         const result = await uploadImage(ticketImageFile, 'vybeme/tickets');
@@ -230,7 +299,32 @@ exports.updateBusinessPost = async (req, res) => {
         cleanupFile(ticketImageFile.path);
         console.error('Ticket image upload failed:', error);
       }
-    } else if (req.body.ticket_image !== undefined) {
+    }
+
+    // Category logic (main + sub) – sync with CategoryTag like normal plans
+    if (updateData.category_main) {
+      const mainCategory = String(updateData.category_main).toLowerCase().trim();
+      const subTags = Array.isArray(updateData.category_sub)
+        ? updateData.category_sub.map((s) => String(s).toLowerCase().trim())
+        : [];
+      let categoryDoc = await CategoryTag.findOne({ tag_name: mainCategory });
+      if (!categoryDoc) {
+        await CategoryTag.create({
+          tag_id: generateId('cat'),
+          tag_name: mainCategory,
+          sub_tags: subTags.map((sub) => ({ sub_tag_id: generateId('sub'), sub_tag_name: sub })),
+        });
+      } else if (subTags.length > 0) {
+        const existingSubs = categoryDoc.sub_tags.map((s) => s.sub_tag_name);
+        const newSubs = subTags.filter((sub) => !existingSubs.includes(sub)).map((sub) => ({ sub_tag_id: generateId('sub'), sub_tag_name: sub }));
+        if (newSubs.length > 0) {
+          categoryDoc.sub_tags.push(...newSubs);
+          await categoryDoc.save();
+        }
+      }
+    }
+
+    if (req.body.ticket_image !== undefined && !ticketImageFile) {
       // Allow updating ticket image URL directly
       updateData.ticket_image = req.body.ticket_image;
     }
@@ -243,10 +337,8 @@ exports.updateBusinessPost = async (req, res) => {
     
     return sendSuccess(res, 'Business post updated successfully', plan);
   } catch (error) {
-    // Cleanup any remaining files
-    if (req.files) {
-      req.files.forEach(file => cleanupFile(file.path));
-    }
+    const allFiles = getAllFiles(req.files);
+    allFiles.forEach((file) => file && file.path && cleanupFile(file.path));
     return sendError(res, error.message, 500);
   }
 };
