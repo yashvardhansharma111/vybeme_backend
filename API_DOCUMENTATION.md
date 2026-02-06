@@ -448,6 +448,33 @@ const socket = io('http://localhost:8000', {
 
 ---
 
+## Business Analytics APIs (authenticated)
+
+All analytics endpoints require the caller to be the business/event owner.
+
+### Per-event analytics
+- **GET** `/analytics/business/event/:plan_id`
+- Auth: Bearer token; user must be the event organizer (plan’s `user_id` or `business_id`).
+- Response (in `data`):
+  - `registered_count`, `checked_in_count`, `showup_rate`, `showup_rate_percent`
+  - `first_timers_count`, `returning_count`, `first_timers_percent`, `returning_percent`
+  - `revenue`, `gender_distribution` (male, female, other), `gender_distribution_percent`
+
+### Overall analytics (e.g. last N months)
+- **GET** `/analytics/business/overall?months=1`
+- Auth: Bearer token; uses token’s `user_id` as business owner.
+- Query: `months` (default 1, max 12).
+- Response (in `data`): same metrics aggregated over all events created in the last N months, plus `per_event[]` with per-event summary (plan_id, title, registered_count, checked_in_count, showup_rate_percent, revenue).
+
+Metrics definitions:
+- **Showup rate**: # checked in / # registered (per event or overall).
+- **% First timers**: # users who registered for the first time on this business’s events / total registered.
+- **% Returning**: # users who registered more than once on this business’s events / total registered.
+- **Revenue**: sum of `price_paid` from registrations.
+- **Gender distribution**: Male, Female, Others (from user profile).
+
+---
+
 ## Error Responses
 
 All errors follow this format:

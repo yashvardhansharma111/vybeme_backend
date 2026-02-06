@@ -20,6 +20,7 @@ const reportRoutes = require('./reportRoutes');
 const savedPostRoutes = require('./savedPostRoutes');
 const uploadRoutes = require('./uploadRoutes');
 const ticketRoutes = require('./ticketRoutes');
+const businessAnalyticsRoutes = require('./businessAnalyticsRoutes');
 
 // API routes
 router.use('/auth', authRoutes);
@@ -44,6 +45,7 @@ router.use('/contacts', contactRoutes);
 router.use('/user', reportRoutes);
 router.use('/post', savedPostRoutes);
 router.use('/ticket', ticketRoutes);
+router.use('/analytics/business', businessAnalyticsRoutes);
 
 // Health check
 router.get('/health', (req, res) => {
