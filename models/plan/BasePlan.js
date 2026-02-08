@@ -77,6 +77,10 @@ const basePlanSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  end_time: {
+    type: String,
+    default: null
+  },
   temporal_tags: {
     type: [String],
     default: []
