@@ -6,6 +6,7 @@ const connectDB = require('./config/database');
 const routes = require('./routes');
 const { sendError } = require('./utils');
 const initializeSocket = require('./socket/socketHandler');
+const deactivatePastEventPlans = require('./jobs/deactivatePastEventPlans');
 
 // Load environment variables
 require('dotenv').config();
@@ -156,6 +157,7 @@ server.listen(PORT, () => {
   console.log(`Socket.io server initialized`);
   console.log(`Environment: ${process.env.NODE_ENV || 'development'}`);
   console.log(`API Base URL: http://localhost:${PORT}/api`);
+  deactivatePastEventPlans.start();
 });
 
 module.exports = { app, server, io };
