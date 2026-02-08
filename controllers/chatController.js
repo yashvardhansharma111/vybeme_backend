@@ -220,6 +220,44 @@ exports.setAnnouncementGroup = async (req, res) => {
 };
 
 /**
+ * Set / update Google Drive link for a group (owner only).
+ */
+exports.setGroupDriveLink = async (req, res) => {
+  try {
+    const { group_id, drive_link } = req.body;
+    const user_id = req.user?.user_id || req.body?.user_id;
+
+    if (!group_id) {
+      return sendError(res, 'group_id is required', 400);
+    }
+    if (!user_id) {
+      return sendError(res, 'user_id is required', 400);
+    }
+
+    const group = await ChatGroup.findOne({ group_id });
+    if (!group) {
+      return sendError(res, 'Group not found', 404);
+    }
+
+    if (String(group.created_by) !== String(user_id)) {
+      return sendError(res, 'Only the group owner can update the drive link', 403);
+    }
+
+    const url = (drive_link || '').trim();
+    if (url && !/^https?:\/\//i.test(url)) {
+      return sendError(res, 'Invalid drive_link. Must start with http:// or https://', 400);
+    }
+
+    group.drive_link = url || null;
+    await group.save();
+
+    return sendSuccess(res, 'Drive link updated successfully', { group_id: group.group_id, drive_link: group.drive_link });
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
  * Get or create business user's announcement group.
  * Each business user has at most ONE announcement group; id is stored on User.announcement_group_id.
  * Returns { group_id }. Reuses existing group if User already has announcement_group_id or if

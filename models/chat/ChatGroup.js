@@ -26,6 +26,10 @@ const chatGroupSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  drive_link: {
+    type: String,
+    default: null
+  },
   is_closed: {
     type: Boolean,
     default: false
