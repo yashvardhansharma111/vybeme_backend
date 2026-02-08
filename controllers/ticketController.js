@@ -258,6 +258,65 @@ exports.registerForEvent = async (req, res) => {
 };
 
 /**
+ * Get all tickets for a user (for profile / tickets & passes)
+ */
+exports.getTicketsByUser = async (req, res) => {
+  try {
+    const { user_id } = req.params;
+    if (!user_id) {
+      return sendError(res, 'user_id is required', 400);
+    }
+    if (req.user && req.user.user_id && req.user.user_id !== user_id) {
+      return sendError(res, 'You can only view your own tickets', 403);
+    }
+
+    const tickets = await Ticket.find({ user_id })
+      .sort({ created_at: -1 })
+      .lean();
+
+    const planIds = [...new Set(tickets.map((t) => t.plan_id))];
+    const plans = await BusinessPlan.find({ plan_id: { $in: planIds } }).lean();
+    const planMap = plans.reduce((acc, p) => {
+      acc[p.plan_id] = {
+        plan_id: p.plan_id,
+        title: p.title,
+        description: p.description,
+        location_text: p.location_text,
+        date: p.date,
+        time: p.time,
+        media: p.media,
+        ticket_image: p.ticket_image || null,
+      };
+      return acc;
+    }, {});
+
+    const registrations = await Registration.find({
+      user_id,
+      ticket_id: { $in: tickets.map((t) => t.ticket_id) },
+    }).lean();
+    const regByTicket = registrations.reduce((acc, r) => {
+      acc[r.ticket_id] = r.status;
+      return acc;
+    }, {});
+
+    const list = tickets.map((t) => ({
+      ticket_id: t.ticket_id,
+      ticket_number: t.ticket_number,
+      status: t.status,
+      price_paid: t.price_paid,
+      created_at: t.created_at,
+      registration_status: regByTicket[t.ticket_id] || null,
+      plan: planMap[t.plan_id] || null,
+    }));
+
+    return sendSuccess(res, 'Tickets retrieved successfully', { tickets: list });
+  } catch (error) {
+    console.error('Error getTicketsByUser:', error);
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
  * Get user's ticket for an event
  */
 exports.getUserTicket = async (req, res) => {
@@ -449,6 +508,45 @@ exports.scanQRCode = async (req, res) => {
     });
   } catch (error) {
     console.error('Error scanning QR code:', error);
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Get guest list for an event (public: who's coming – name, avatar, bio only)
+ * Any user can call this to see who has registered.
+ */
+exports.getGuestList = async (req, res) => {
+  try {
+    const { plan_id } = req.params;
+
+    const plan = await BusinessPlan.findOne({ plan_id });
+    if (!plan) {
+      return sendError(res, 'Event not found', 404);
+    }
+
+    const registrations = await Registration.find({ plan_id })
+      .sort({ created_at: -1 })
+      .lean();
+
+    const guestList = await Promise.all(
+      registrations.map(async (reg) => {
+        const user = await User.findOne({ user_id: reg.user_id }).lean();
+        return {
+          user_id: reg.user_id,
+          name: user?.name || 'Unknown',
+          profile_image: user?.profile_image || null,
+          bio: user?.bio || '',
+        };
+      })
+    );
+
+    return sendSuccess(res, 'Guest list retrieved successfully', {
+      guests: guestList,
+      total: guestList.length,
+    });
+  } catch (error) {
+    console.error('Error getting guest list:', error);
     return sendError(res, error.message, 500);
   }
 };
