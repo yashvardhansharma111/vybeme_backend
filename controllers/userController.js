@@ -14,12 +14,23 @@ exports.getMe = async (req, res) => {
       return sendError(res, 'User not found', 404);
     }
     
-    const user = await User.findOne({ user_id: session.user_id });
+    const user = await User.findOne({ user_id: session.user_id }).lean();
     if (!user) {
       return sendError(res, 'User not found', 404);
     }
-    
-    return sendSuccess(res, 'Profile retrieved successfully', user);
+
+    const profile = {
+      user_id: user.user_id,
+      name: user.name,
+      profile_image: user.profile_image,
+      bio: user.bio,
+      gender: user.gender,
+      interests: user.interests || [],
+      is_business: user.is_business,
+      business_id: user.business_id,
+      social_media: user.social_media || {},
+    };
+    return sendSuccess(res, 'Profile retrieved successfully', profile);
   } catch (error) {
     return sendError(res, error.message, 500);
   }

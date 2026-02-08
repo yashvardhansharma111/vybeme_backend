@@ -221,30 +221,45 @@ exports.setAnnouncementGroup = async (req, res) => {
 
 /**
  * Send message
+ * Validates that sender is a member of the group so users can only send to groups they belong to.
  */
 exports.sendMessage = async (req, res) => {
   try {
     const { group_id, user_id, type, content } = req.body;
-    
+
+    if (!group_id || !user_id || !type) {
+      return sendError(res, 'group_id, user_id and type are required', 400);
+    }
+
+    const group = await ChatGroup.findOne({ group_id }).lean();
+    if (!group) {
+      return sendError(res, 'Chat group not found', 404);
+    }
+
+    const members = group.members || [];
+    const isMember = members.some((m) => String(m) === String(user_id));
+    if (!isMember) {
+      return sendError(res, 'You are not a member of this chat. Join the plan to send messages.', 403);
+    }
+
+    // Normalize content: text can be string; ensure it's stored correctly
+    const contentToStore = type === 'text' && typeof content === 'string' ? content : content;
+
     const message = await ChatMessage.create({
       message_id: generateId('msg'),
       group_id,
       user_id,
       type,
-      content,
+      content: contentToStore,
       reactions: []
     });
-    
-    // Update plan chat message count
-    const group = await ChatGroup.findOne({ group_id });
-    if (group) {
-      const { BasePlan } = require('../models');
-      await BasePlan.updateOne(
-        { plan_id: group.plan_id },
-        { $inc: { chat_message_count: 1 } }
-      );
-    }
-    
+
+    const { BasePlan } = require('../models');
+    await BasePlan.updateOne(
+      { plan_id: group.plan_id },
+      { $inc: { chat_message_count: 1 } }
+    );
+
     return sendSuccess(res, 'Message sent successfully', { message_id: message.message_id }, 201);
   } catch (error) {
     return sendError(res, error.message, 500);

@@ -44,7 +44,8 @@ const corsOptions = {
       'http://localhost:8081',
       'http://localhost:19006',
       'http://localhost:3000',
-      'https://vybeme.app', // Add your production domain
+      'https://vybeme.app',
+      'https://app.vybeme.in', // Web app (shared post links open here)
     ];
     
     if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('ngrok')) {

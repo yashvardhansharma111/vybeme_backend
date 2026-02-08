@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { Ticket, Registration, BusinessPlan, User, ChatGroup } = require('../models');
+const { Ticket, Registration, BusinessPlan, User, ChatGroup, Notification } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
 
 /**
@@ -188,7 +188,30 @@ exports.registerForEvent = async (req, res) => {
     
     // Get user details for response
     const user = await User.findOne({ user_id }).lean();
-    
+
+    // Notify plan/business owner when someone registers (unless they're notifying themselves)
+    const planOwnerId = plan.user_id || plan.business_id;
+    if (planOwnerId && planOwnerId !== user_id) {
+      try {
+        await Notification.create({
+          notification_id: generateId('notification'),
+          user_id: planOwnerId,
+          type: 'join',
+          source_plan_id: plan_id,
+          source_user_id: user_id,
+          payload: {
+            registration_id: registration.registration_id,
+            ticket_id: ticketId,
+            plan_title: plan.title,
+            message: user?.name ? `${user.name} registered for your event "${plan.title}".` : 'Someone registered for your event.',
+          },
+          is_read: false,
+        });
+      } catch (notifErr) {
+        console.error('Failed to create registration notification:', notifErr);
+      }
+    }
+
     // Get plan details for ticket display
     const planDetails = {
       plan_id: plan.plan_id,
@@ -198,9 +221,12 @@ exports.registerForEvent = async (req, res) => {
       date: plan.date || null,
       time: plan.time || null,
       media: plan.media || [],
-      ticket_image: plan.ticket_image || null // Use ticket-specific image if available
+      ticket_image: plan.ticket_image || null,
+      passes: plan.passes || [],
+      category_main: plan.category_main || null,
+      category_sub: plan.category_sub || [],
     };
-    
+
     return sendSuccess(res, 'Registration successful', {
       registration: {
         ...registration.toObject(),
@@ -262,7 +288,10 @@ exports.getUserTicket = async (req, res) => {
           date: plan.date,
           time: plan.time,
           media: plan.media,
-          ticket_image: plan.ticket_image || null
+          ticket_image: plan.ticket_image || null,
+          passes: plan.passes || [],
+          category_main: plan.category_main || null,
+          category_sub: plan.category_sub || [],
         } : null,
         user: user ? {
           user_id: user.user_id,
@@ -302,7 +331,10 @@ exports.getTicketById = async (req, res) => {
           date: plan.date,
           time: plan.time,
           media: plan.media,
-          ticket_image: plan.ticket_image || null
+          ticket_image: plan.ticket_image || null,
+          passes: plan.passes || [],
+          category_main: plan.category_main || null,
+          category_sub: plan.category_sub || [],
         } : null,
         user: user ? {
           user_id: user.user_id,

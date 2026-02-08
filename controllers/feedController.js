@@ -108,23 +108,32 @@ exports.getHomeFeed = async (req, res) => {
       .slice(parseInt(offset), parseInt(offset) + parseInt(limit))
       .map(plan => {
         const isReposted = !!repostMap[plan.plan_id];
-        return {
+        const item = {
           post_id: plan.plan_id,
           user_id: plan.user_id,
           title: plan.title,
           description: plan.description,
           media: plan.media,
           tags: plan.category_sub,
+          category_main: plan.category_main || '',
           timestamp: plan.created_at,
           location: plan.location_coordinates || plan.location_text,
           is_active: plan.is_live,
           interaction_count: plan.interaction_count,
+          joins_count: plan.joins_count ?? 0,
           is_repost: false,
           cannot_be_reposted: isReposted,
-          type: plan.type || 'regular', // Include plan type (business or regular)
-          // Include ranking score for debugging (optional, can remove in production)
+          type: plan.type || 'regular',
           _rankingScore: plan._rankingScore
         };
+        if (plan.type === 'business') {
+          item.ticket_image = plan.ticket_image || null;
+          item.passes = plan.passes || [];
+          item.location_text = plan.location_text;
+          item.date = plan.date;
+          item.time = plan.time;
+        }
+        return item;
       });
     
     // Format reposts as separate feed items
@@ -132,19 +141,21 @@ exports.getHomeFeed = async (req, res) => {
       .slice(0, Math.floor(parseInt(limit) * 0.3)) // 30% of feed can be reposts
       .map(plan => {
         const repost = plan._repostData;
-        return {
-          post_id: repost.repost_id, // Use repost_id as the post_id for reposts
-          user_id: repost.repost_author_id, // Repost author
-          title: repost.repost_title || plan.title, // Reposter's title, else original
-          description: repost.repost_description || plan.description, // Reposter's description, else original
+        const item = {
+          post_id: repost.repost_id,
+          user_id: repost.repost_author_id,
+          title: repost.repost_title || plan.title,
+          description: repost.repost_description || plan.description,
           media: plan.media,
           tags: plan.category_sub,
-          timestamp: repost.created_at, // Repost timestamp
+          category_main: plan.category_main || '',
+          timestamp: repost.created_at,
           location: plan.location_coordinates || plan.location_text,
           is_active: plan.is_live,
           interaction_count: plan.interaction_count,
+          joins_count: plan.joins_count ?? 0,
           is_repost: true,
-          type: plan.type || 'regular', // Include plan type (business or regular)
+          type: plan.type || 'regular',
           repost_data: {
             repost_id: repost.repost_id,
             added_content: repost.added_content,
@@ -156,6 +167,14 @@ exports.getHomeFeed = async (req, res) => {
           },
           _rankingScore: plan._rankingScore
         };
+        if (plan.type === 'business') {
+          item.ticket_image = plan.ticket_image || null;
+          item.passes = plan.passes || [];
+          item.location_text = plan.location_text;
+          item.date = plan.date;
+          item.time = plan.time;
+        }
+        return item;
       });
     
     // Combine regular feed and reposts, maintaining ranking order
