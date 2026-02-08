@@ -220,8 +220,87 @@ exports.setAnnouncementGroup = async (req, res) => {
 };
 
 /**
- * Send message
- * Validates that sender is a member of the group so users can only send to groups they belong to.
+ * Get or create business user's announcement group.
+ * Each business user has at most ONE announcement group; id is stored on User.announcement_group_id.
+ * Returns { group_id }. Reuses existing group if User already has announcement_group_id or if
+ * a group already exists for plan_id = announcement_${user_id}.
+ */
+exports.getOrCreateAnnouncementGroup = async (req, res) => {
+  try {
+    const { User } = require('../models');
+    const user_id = req.user?.user_id || req.body?.user_id;
+    if (!user_id) {
+      return sendError(res, 'user_id is required', 400);
+    }
+
+    const user = await User.findOne({ user_id }).lean();
+    if (!user) {
+      return sendError(res, 'User not found', 404);
+    }
+
+    const plan_id = `announcement_${user_id}`;
+
+    // 1) Prefer stored announcement_group_id on User
+    if (user.announcement_group_id) {
+      const group = await ChatGroup.findOne({ group_id: user.announcement_group_id }).lean();
+      if (group) {
+        return sendSuccess(res, 'Announcement group retrieved', { group_id: group.group_id });
+      }
+    }
+
+    // 2) Recover: group may exist (e.g. plan_id) but User not updated – avoid creating duplicate
+    const existingByPlanId = await ChatGroup.findOne({ plan_id, is_announcement_group: true }).lean();
+    if (existingByPlanId) {
+      await User.updateOne(
+        { user_id },
+        { $set: { announcement_group_id: existingByPlanId.group_id } }
+      );
+      return sendSuccess(res, 'Announcement group retrieved', { group_id: existingByPlanId.group_id });
+    }
+
+    // 3) Create new announcement group (one per business user)
+    const businessDisplayName = (user.name && user.name.trim()) ? user.name.trim() : 'Business';
+    const group_name = `${businessDisplayName}'s Announcement Group`;
+
+    const group = await ChatGroup.create({
+      group_id: generateId('group'),
+      plan_id,
+      created_by: user_id,
+      members: [user_id],
+      is_announcement_group: true,
+      group_name,
+    });
+
+    const updateResult = await User.findOneAndUpdate(
+      { user_id },
+      { $set: { announcement_group_id: group.group_id } },
+      { new: true }
+    );
+    if (!updateResult || !updateResult.announcement_group_id) {
+      console.error('Failed to save announcement_group_id to User', user_id, 'group_id', group.group_id);
+    }
+
+    const welcomeText = `Welcome everyone! I'll be announcing further details on this group – stay tuned!`;
+    await ChatMessage.create({
+      message_id: generateId('msg'),
+      group_id: group.group_id,
+      user_id,
+      type: 'text',
+      content: welcomeText,
+      reactions: [],
+    });
+
+    return sendSuccess(res, 'Announcement group created', { group_id: group.group_id }, 201);
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Send message.
+ * Two group types:
+ * - Event group (plan.group_id): is_announcement_group = false → any member can send.
+ * - Announcement group (User.announcement_group_id): is_announcement_group = true → only created_by can send.
  */
 exports.sendMessage = async (req, res) => {
   try {
@@ -242,6 +321,11 @@ exports.sendMessage = async (req, res) => {
       return sendError(res, 'You are not a member of this chat. Join the plan to send messages.', 403);
     }
 
+    // Announcement groups: only the group owner (created_by) can send messages and photos
+    if (group.is_announcement_group && String(group.created_by) !== String(user_id)) {
+      return sendError(res, 'Only the group owner can send messages in this announcement group.', 403);
+    }
+
     // Normalize content: text can be string; ensure it's stored correctly
     const contentToStore = type === 'text' && typeof content === 'string' ? content : content;
 
@@ -255,10 +339,12 @@ exports.sendMessage = async (req, res) => {
     });
 
     const { BasePlan } = require('../models');
-    await BasePlan.updateOne(
-      { plan_id: group.plan_id },
-      { $inc: { chat_message_count: 1 } }
-    );
+    if (group.plan_id && !group.plan_id.startsWith('announcement_')) {
+      await BasePlan.updateOne(
+        { plan_id: group.plan_id },
+        { $inc: { chat_message_count: 1 } }
+      );
+    }
 
     return sendSuccess(res, 'Message sent successfully', { message_id: message.message_id }, 201);
   } catch (error) {
@@ -378,6 +464,14 @@ exports.deleteMessage = async (req, res) => {
 exports.createPoll = async (req, res) => {
   try {
     const { group_id, question, options = [] } = req.body;
+
+    const group = await ChatGroup.findOne({ group_id }).lean();
+    if (!group) {
+      return sendError(res, 'Group not found', 404);
+    }
+    if (group.is_announcement_group && String(group.created_by) !== String(req.body.user_id)) {
+      return sendError(res, 'Only the group owner can create polls in this announcement group.', 403);
+    }
     
     const poll = await PollMessage.create({
       poll_id: generateId('poll'),

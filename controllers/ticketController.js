@@ -112,8 +112,7 @@ exports.registerForEvent = async (req, res) => {
       );
     }
     
-    // Add user to the business event group immediately upon registration
-    // This happens regardless of approval status as per user requirement
+    // Add user to this event's group (plan.group_id = event-specific group; everyone can chat)
     if (plan.group_id) {
       try {
         const group = await ChatGroup.findOne({ group_id: plan.group_id });
@@ -128,7 +127,16 @@ exports.registerForEvent = async (req, res) => {
             group.members.push(user_id);
             const savedGroup = await group.save();
             
-            // Verify the save worked
+            const { ChatMessage } = require('../models');
+            await ChatMessage.create({
+              message_id: generateId('msg'),
+              group_id: plan.group_id,
+              user_id,
+              type: 'text',
+              content: 'Hi',
+              reactions: [],
+            });
+            
             const verifyGroup = await ChatGroup.findOne({ group_id: plan.group_id }).lean();
             console.log(`✅ Added user ${user_id} to group ${plan.group_id} for business plan ${plan_id}`);
             console.log(`   - Group now has ${savedGroup.members.length} members: [${savedGroup.members.join(', ')}]`);
@@ -142,8 +150,8 @@ exports.registerForEvent = async (req, res) => {
         // Continue even if adding to group fails - don't block registration
       }
     } else {
-      console.error(`⚠️ Business plan ${plan_id} has no group_id - creating group now`);
-      // Fallback: Create group if it doesn't exist (for plans created before this feature)
+      // Fallback: create event group and save group_id to plan (for plans created before auto-create)
+      console.error(`⚠️ Business plan ${plan_id} has no group_id - creating event group now`);
       try {
         const { ChatGroup } = require('../models');
         const { generateId } = require('../utils');
@@ -162,6 +170,7 @@ exports.registerForEvent = async (req, res) => {
           { plan_id: plan.plan_id },
           { $set: { group_id: newGroup.group_id } }
         );
+        plan.group_id = newGroup.group_id;
         
         // Post welcome message
         const { ChatMessage, BasePlan } = require('../models');
@@ -172,6 +181,14 @@ exports.registerForEvent = async (req, res) => {
           type: 'text',
           content: `Welcome to the group for ${plan.title}`,
           reactions: []
+        });
+        await ChatMessage.create({
+          message_id: generateId('msg'),
+          group_id: newGroup.group_id,
+          user_id,
+          type: 'text',
+          content: 'Hi',
+          reactions: [],
         });
         
         await BasePlan.updateOne(
@@ -212,7 +229,7 @@ exports.registerForEvent = async (req, res) => {
       }
     }
 
-    // Get plan details for ticket display
+    // Get plan details for ticket display (include group_id for "Go to chat")
     const planDetails = {
       plan_id: plan.plan_id,
       title: plan.title || '',
@@ -225,6 +242,7 @@ exports.registerForEvent = async (req, res) => {
       passes: plan.passes || [],
       category_main: plan.category_main || null,
       category_sub: plan.category_sub || [],
+      group_id: plan.group_id || null,
     };
 
     return sendSuccess(res, 'Registration successful', {
@@ -394,6 +412,7 @@ exports.getTicketById = async (req, res) => {
           passes: plan.passes || [],
           category_main: plan.category_main || null,
           category_sub: plan.category_sub || [],
+          group_id: plan.group_id || null,
         } : null,
         user: user ? {
           user_id: user.user_id,

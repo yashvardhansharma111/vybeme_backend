@@ -132,13 +132,13 @@ exports.createBusinessPost = async (req, res) => {
       }
     }
     
-    // Auto-create chat group for the business event
+    // Event-specific group: one per plan; group_id stored on plan; all registrants get added; everyone can text
     try {
       const groupData = {
         group_id: generateId('group'),
         plan_id: plan.plan_id,
         created_by: plan.user_id,
-        members: [plan.user_id], // Business owner is automatically added
+        members: [plan.user_id],
         is_announcement_group: false,
         group_name: plan.title || `Event: ${plan.plan_id}`
       };

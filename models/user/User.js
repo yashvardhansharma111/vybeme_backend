@@ -49,6 +49,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: null
   },
+  announcement_group_id: {
+    type: String,
+    default: null
+  },
   created_at: {
     type: Date,
     default: Date.now

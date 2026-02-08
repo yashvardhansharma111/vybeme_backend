@@ -10,6 +10,7 @@ router.get('/group/details/:group_id', authenticate, chatController.getGroupDeta
 router.post('/group/add-members', authenticate, chatController.addMembers);
 router.post('/group/remove-member', authenticate, chatController.removeMember);
 router.post('/group/announcement', authenticate, chatController.setAnnouncementGroup);
+router.get('/announcement-group/get-or-create', authenticate, chatController.getOrCreateAnnouncementGroup);
 
 // Message routes
 router.post('/send', authenticate, chatController.sendMessage);
