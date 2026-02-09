@@ -653,6 +653,14 @@ exports.getChatLists = async (req, res) => {
         is_closed: false
       }).lean();
     }
+    // If still none, use $expr so member comparison is string-based (organiser groups can be missed by type mismatch)
+    if (userGroups.length === 0) {
+      const exprGroups = await ChatGroup.find({
+        $expr: { $in: [String(user_id), { $map: { input: '$members', as: 'm', in: { $toString: '$$m' } } }] },
+        is_closed: false
+      }).lean();
+      if (exprGroups.length > 0) userGroups = exprGroups;
+    }
     
     console.log(`📋 Found ${userGroups.length} groups for user ${user_id}`);
     
