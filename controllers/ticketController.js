@@ -49,6 +49,14 @@ exports.registerForEvent = async (req, res) => {
     if (plan.type !== 'business') {
       return sendError(res, 'This endpoint is only for business plans', 400);
     }
+
+    if (plan.is_women_only) {
+      const registeringUser = await User.findOne({ user_id }).lean();
+      const gender = (registeringUser?.gender || '').toLowerCase();
+      if (gender !== 'female') {
+        return sendError(res, 'Only women can register for this event', 403);
+      }
+    }
     
     // Check if user already registered
     const existingRegistration = await Registration.findOne({ plan_id, user_id });

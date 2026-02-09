@@ -43,12 +43,8 @@ exports.getHomeFeed = async (req, res) => {
       user = await User.findOne({ user_id }).lean();
     }
 
-    // Women-only posts: show only to users with gender === 'female'; hide from male, other, and guests
-    const isViewerFemale = user && (user.gender || '').toLowerCase() === 'female';
-    let plansFiltered = plans.filter((p) => {
-      if (!p.is_women_only) return true;
-      return isViewerFemale;
-    });
+    // Women-only posts are visible to everyone; only registration is restricted to women
+    let plansFiltered = plans;
 
     // Apply ranking algorithm
     let rankedPlans;
@@ -79,12 +75,11 @@ exports.getHomeFeed = async (req, res) => {
     const originalPlansMap = {};
     originalPlans.forEach(p => { originalPlansMap[p.plan_id] = p; });
     
-    // Rank reposts (using original plan data); exclude women-only for non-female viewers
+    // Rank reposts (using original plan data)
     const repostPlans = allReposts
       .map(repost => {
         const originalPlan = originalPlansMap[repost.original_plan_id];
         if (!originalPlan) return null;
-        if (originalPlan.is_women_only && !isViewerFemale) return null;
         return {
           ...originalPlan,
           created_at: repost.created_at,
@@ -124,7 +119,8 @@ exports.getHomeFeed = async (req, res) => {
           is_repost: false,
           cannot_be_reposted: isReposted,
           type: plan.type || 'regular',
-          _rankingScore: plan._rankingScore
+          _rankingScore: plan._rankingScore,
+          is_women_only: !!plan.is_women_only,
         };
         if (plan.type === 'business') {
           item.ticket_image = plan.ticket_image || null;
@@ -156,6 +152,7 @@ exports.getHomeFeed = async (req, res) => {
           joins_count: plan.joins_count ?? 0,
           is_repost: true,
           type: plan.type || 'regular',
+          is_women_only: !!plan.is_women_only,
           repost_data: {
             repost_id: repost.repost_id,
             added_content: repost.added_content,
