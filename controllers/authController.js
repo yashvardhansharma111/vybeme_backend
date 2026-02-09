@@ -1,5 +1,5 @@
 const { AuthOTP, User, UserSession } = require('../models');
-const { sendSuccess, sendError, generateId, generateOTP, hashString, validatePhoneNumber } = require('../utils');
+const { sendSuccess, sendError, generateId, hashString, validatePhoneNumber } = require('../utils');
 const { generateAccessToken, generateRefreshToken } = require('../utils/jwt');
 const { storeOTP, getOTP, markOTPAsUsed, incrementAttemptCount } = require('../utils/otpCache');
 
@@ -14,17 +14,8 @@ exports.sendOTP = async (req, res, next) => {
       return sendError(res, 'Invalid phone number', 400);
     }
     
-    // Dummy phone number for Play Store testing - always use OTP 000000
-    const DUMMY_PHONE = '9999988888';
-    const DUMMY_OTP = '000000';
-    
-    let otp;
-    if (phone_number === DUMMY_PHONE) {
-      otp = DUMMY_OTP;
-    } else {
-      otp = generateOTP(6);
-    }
-    
+    // All OTPs are 000000 (no random generation)
+    const otp = '000000';
     const otpHash = await hashString(otp);
     const otp_id = generateId('otp');
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
@@ -261,17 +252,8 @@ exports.resendOTP = async (req, res, next) => {
       return sendError(res, 'Invalid phone number', 400);
     }
     
-    // Dummy phone number for Play Store testing - always use OTP 000000
-    const DUMMY_PHONE = '9999988888';
-    const DUMMY_OTP = '000000';
-    
-    let otp;
-    if (phone_number === DUMMY_PHONE) {
-      otp = DUMMY_OTP;
-    } else {
-      otp = generateOTP(6);
-    }
-    
+    // All OTPs are 000000 (no random generation)
+    const otp = '000000';
     const otpHash = await hashString(otp);
     const otp_id = generateId('otp');
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
