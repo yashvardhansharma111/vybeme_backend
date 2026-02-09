@@ -42,6 +42,11 @@ const registrationSchema = new mongoose.Schema({
     type: String, // user_id of business owner who checked in
     default: null
   },
+  checked_in_via: {
+    type: String,
+    enum: ['qr', 'manual'],
+    default: null // 'manual' = checked in via attendee list; 'qr' = scanned; null = legacy (treat as qr)
+  },
   price_paid: {
     type: Number,
     default: 0

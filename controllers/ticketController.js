@@ -498,12 +498,13 @@ exports.scanQRCode = async (req, res) => {
     ticket.checked_in_by = scanner_user_id;
     await ticket.save();
 
-    // Update registration
+    // Update registration (QR check-in is permanent)
     const registration = await Registration.findOne({ ticket_id: ticket.ticket_id });
     if (registration) {
       registration.checked_in = true;
       registration.checked_in_at = new Date();
       registration.checked_in_by = scanner_user_id;
+      registration.checked_in_via = 'qr';
       await registration.save();
     }
 
@@ -645,6 +646,7 @@ exports.getAttendeeList = async (req, res) => {
           status: reg.status,
           checked_in: reg.checked_in || ticket?.checked_in || false,
           checked_in_at: reg.checked_in_at || ticket?.checked_in_at || null,
+          checked_in_via: reg.checked_in_via || null,
           price_paid: reg.price_paid,
           created_at: reg.created_at
         };
@@ -701,10 +703,11 @@ exports.manualCheckIn = async (req, res) => {
     
     const isCheckIn = action === 'checkin';
     
-    // Update registration
+    // Update registration (manual check-in: can be unchecked later)
     registration.checked_in = isCheckIn;
     registration.checked_in_at = isCheckIn ? new Date() : null;
     registration.checked_in_by = isCheckIn ? user_id : null;
+    registration.checked_in_via = isCheckIn ? 'manual' : (registration.checked_in_via || null);
     await registration.save();
     
     // Update ticket if exists

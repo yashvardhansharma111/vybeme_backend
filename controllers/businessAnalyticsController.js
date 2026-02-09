@@ -78,6 +78,23 @@ exports.getEventAnalytics = async (req, res) => {
       other: total_gender > 0 ? (genderMap.other / total_gender) * 100 : 0,
     };
 
+    const passes = plan.passes || [];
+    const passNameById = passes.reduce((acc, p) => {
+      acc[p.pass_id] = p.name || 'Pass';
+      return acc;
+    }, {});
+    const byPass = {};
+    registrations.forEach((r) => {
+      const pid = r.pass_id || 'unknown';
+      byPass[pid] = (byPass[pid] || 0) + 1;
+    });
+    const ticket_distribution = Object.entries(byPass).map(([pass_id, count]) => ({
+      pass_id,
+      name: passNameById[pass_id] || (pass_id === 'unknown' ? 'Other' : pass_id),
+      count,
+      percent: total_registered > 0 ? Math.round((count / total_registered) * 10000) / 100 : 0,
+    })).sort((a, b) => b.count - a.count);
+
     return sendSuccess(res, 'Event analytics retrieved', {
       plan_id,
       title: plan.title,
@@ -92,6 +109,7 @@ exports.getEventAnalytics = async (req, res) => {
       revenue: Math.round(revenue * 100) / 100,
       gender_distribution,
       gender_distribution_percent,
+      ticket_distribution,
     });
   } catch (error) {
     console.error('Error in getEventAnalytics:', error);
