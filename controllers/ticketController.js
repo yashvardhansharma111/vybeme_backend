@@ -531,31 +531,53 @@ exports.scanQRCode = async (req, res) => {
   }
 };
 
+const REGISTERED_STATUSES = ['pending', 'approved'];
+
 /**
  * Get guest list for an event (public: who's coming – name, avatar, bio only)
  * Any user can call this to see who has registered.
+ * Each guest includes is_returning: true if they have registered for more than one of this owner's events.
  */
 exports.getGuestList = async (req, res) => {
   try {
     const { plan_id } = req.params;
 
-    const plan = await BusinessPlan.findOne({ plan_id });
+    const plan = await BusinessPlan.findOne({ plan_id }).lean();
     if (!plan) {
       return sendError(res, 'Event not found', 404);
     }
 
-    const registrations = await Registration.find({ plan_id })
+    const owner_id = plan.user_id || plan.business_id;
+    const registrations = await Registration.find({
+      plan_id,
+      status: { $in: REGISTERED_STATUSES },
+    })
       .sort({ created_at: -1 })
       .lean();
+
+    const user_ids = [...new Set(registrations.map((r) => r.user_id))];
+    let countByUser = {};
+    if (user_ids.length > 0) {
+      const registrationCountByUser = await Registration.aggregate([
+        { $match: { status: { $in: REGISTERED_STATUSES }, user_id: { $in: user_ids } } },
+        { $lookup: { from: 'plans', localField: 'plan_id', foreignField: 'plan_id', as: 'plan' } },
+        { $unwind: '$plan' },
+        { $match: { $or: [{ 'plan.user_id': owner_id }, { 'plan.business_id': owner_id }] } },
+        { $group: { _id: '$user_id', count: { $sum: 1 } } },
+      ]);
+      countByUser = Object.fromEntries(registrationCountByUser.map((r) => [r._id, r.count]));
+    }
 
     const guestList = await Promise.all(
       registrations.map(async (reg) => {
         const user = await User.findOne({ user_id: reg.user_id }).lean();
+        const count = countByUser[reg.user_id] || 0;
         return {
           user_id: reg.user_id,
           name: user?.name || 'Unknown',
           profile_image: user?.profile_image || null,
           bio: user?.bio || '',
+          is_returning: count > 1,
         };
       })
     );
