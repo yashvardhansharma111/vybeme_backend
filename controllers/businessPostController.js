@@ -134,13 +134,16 @@ exports.createBusinessPost = async (req, res) => {
     
     // Event-specific group: one per plan; group_id stored on plan; all registrants get added; everyone can text
     try {
+      const driveDetail = (plan.add_details || []).find((d) => d.detail_type === 'google_drive_link');
+      const driveLinkFromPlan = driveDetail ? ((driveDetail.description || driveDetail.title || '').trim() || null) : null;
       const groupData = {
         group_id: generateId('group'),
         plan_id: plan.plan_id,
         created_by: plan.user_id,
         members: [plan.user_id],
         is_announcement_group: false,
-        group_name: plan.title || `Event: ${plan.plan_id}`
+        group_name: plan.title || `Event: ${plan.plan_id}`,
+        ...(driveLinkFromPlan ? { drive_link: driveLinkFromPlan } : {})
       };
       
       console.log(`🔍 Creating group with data:`, JSON.stringify(groupData, null, 2));
