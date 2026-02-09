@@ -8,9 +8,14 @@ const addDetailSchema = new mongoose.Schema({
   },
   title: {
     type: String,
-    required: true
+    default: ''  // For non–additional_info: label (e.g. "Distance"); for additional_info: legacy/fallback
   },
   description: {
+    type: String,
+    default: ''
+  },
+  // For detail_type === 'additional_info' only: explicit sub-fields
+  heading: {
     type: String,
     default: ''
   }
