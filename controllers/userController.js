@@ -108,6 +108,18 @@ exports.updateProfile = async (req, res) => {
     if (bio !== undefined) user.bio = bio;
     if (gender !== undefined) user.gender = gender;
     if (req.body.interests !== undefined) user.interests = req.body.interests;
+    if (req.body.social_media !== undefined) {
+      const sm = req.body.social_media;
+      const current = user.social_media && typeof user.social_media === 'object' ? { ...user.social_media } : {};
+      user.social_media = {
+        ...current,
+        ...(sm.instagram !== undefined && { instagram: sm.instagram }),
+        ...(sm.twitter !== undefined && { twitter: sm.twitter }),
+        ...(sm.x !== undefined && { x: sm.x }),
+        ...(sm.facebook !== undefined && { facebook: sm.facebook }),
+        ...(sm.snapchat !== undefined && { snapchat: sm.snapchat }),
+      };
+    }
     
     await user.save();
     
