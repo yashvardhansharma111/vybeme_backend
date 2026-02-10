@@ -65,7 +65,9 @@ async function sendOTP(phone, otp) {
 
     return { success: true };
   } catch (err) {
-    console.error('Renflair SMS error:', err.message);
+    const msg = err?.message || err?.code || String(err);
+    console.error('Renflair SMS error:', msg);
+    if (err?.stack) console.error(err.stack);
     return { success: false, message: 'Could not send verification code. Please check your connection and try again.' };
   }
 }

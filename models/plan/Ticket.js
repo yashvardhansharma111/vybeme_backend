@@ -28,8 +28,7 @@ const ticketSchema = new mongoose.Schema({
   qr_code_hash: {
     type: String,
     required: true,
-    unique: true,
-    index: true // For fast lookup during scanning
+    unique: true
   },
   ticket_number: {
     type: String,
@@ -68,6 +67,5 @@ const ticketSchema = new mongoose.Schema({
 });
 
 ticketSchema.index({ plan_id: 1, user_id: 1 });
-ticketSchema.index({ qr_code_hash: 1 });
 
 module.exports = mongoose.model('Ticket', ticketSchema);

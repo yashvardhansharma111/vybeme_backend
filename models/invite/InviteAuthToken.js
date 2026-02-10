@@ -82,7 +82,6 @@ const inviteAuthTokenSchema = new mongoose.Schema({
   }
 });
 
-inviteAuthTokenSchema.index({ token: 1 });
 inviteAuthTokenSchema.index({ plan_id: 1 });
 
 module.exports = mongoose.model('InviteAuthToken', inviteAuthTokenSchema);
