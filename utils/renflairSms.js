@@ -1,11 +1,13 @@
 /**
- * Renflair SMS API - send OTP via https://sms.renflair.in/V1.php
- * Query params: API, PHONE, OTP
+ * Renflair SMS API - send OTP via GET with query params: API, PHONE, OTP
+ * URL from env RENFLAIR_API_URL (default https://sms.renflair.in/V1.php)
  */
 
 const https = require('https');
 
-const RENFLAIR_BASE = 'https://sms.renflair.in/V1.php';
+function getBaseUrl() {
+  return process.env.RENFLAIR_API_URL || 'https://sms.renflair.in/V1.php';
+}
 
 function getApiKey() {
   return process.env.RENFLAIR_API_KEY || process.env.renflair_api || '';
@@ -43,7 +45,8 @@ async function sendOTP(phone, otp) {
     return { success: false, message: 'Invalid OTP' };
   }
 
-  const url = `${RENFLAIR_BASE}?API=${encodeURIComponent(apiKey)}&PHONE=${encodeURIComponent(normalizedPhone)}&OTP=${encodeURIComponent(otpStr)}`;
+  const baseUrl = getBaseUrl();
+  const url = `${baseUrl}?API=${encodeURIComponent(apiKey)}&PHONE=${encodeURIComponent(normalizedPhone)}&OTP=${encodeURIComponent(otpStr)}`;
 
   try {
     const { statusCode, body } = await get(url);

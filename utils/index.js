@@ -1,5 +1,5 @@
 const { sendResponse, sendSuccess, sendError } = require('./response');
-const { validatePhoneNumber, validateEmail, validateObjectId, validateRequired } = require('./validators');
+const { validatePhoneNumber, normalizePhoneToIndia, validateEmail, validateObjectId, validateRequired } = require('./validators');
 const { generateId, generateOTP, generateOTP4, hashString, calculateDistance, paginate } = require('./helpers');
 const { AppError, ValidationError, NotFoundError, UnauthorizedError, ForbiddenError } = require('./errors');
 const { generateAccessToken, generateRefreshToken, verifyAccessToken, verifyRefreshToken } = require('./jwt');
@@ -9,6 +9,7 @@ module.exports = {
   sendSuccess,
   sendError,
   validatePhoneNumber,
+  normalizePhoneToIndia,
   validateEmail,
   validateObjectId,
   validateRequired,

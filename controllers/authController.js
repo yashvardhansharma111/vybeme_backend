@@ -1,22 +1,24 @@
 const { AuthOTP, User, UserSession } = require('../models');
-const { sendSuccess, sendError, generateId, hashString, validatePhoneNumber } = require('../utils');
+const { sendSuccess, sendError, generateId, hashString, validatePhoneNumber, normalizePhoneToIndia } = require('../utils');
 const { generateAccessToken, generateRefreshToken } = require('../utils/jwt');
-const { storeOTP, getOTP, markOTPAsUsed, incrementAttemptCount } = require('../utils/otpCache');
+const { storeOTP, getOTP, markOTPAsUsed, incrementAttemptCount, deleteOTP } = require('../utils/otpCache');
 
 const OTP_TTL_SECONDS = 600; // 10 minutes
 const MAX_OTP_ATTEMPTS = 5;
 const DEV_OTP = '0000'; // Same OTP for all numbers (no SMS sent)
+const DEMO_PHONE = '+919999999999'; // Dummy number for testing; OTP 0000
 
 /**
  * Send OTP (4-digit 0000 for all numbers, stored in node-cache; no SMS sent)
+ * Phone is normalized to +91XXXXXXXXXX (Indian) in backend.
  */
 exports.sendOTP = async (req, res, next) => {
   try {
-    const { phone_number } = req.body;
-
-    if (!validatePhoneNumber(phone_number)) {
+    const raw = req.body.phone_number;
+    if (!validatePhoneNumber(raw)) {
       return sendError(res, 'Please enter a valid 10-digit phone number', 400);
     }
+    const phone_number = normalizePhoneToIndia(raw) || raw;
 
     const otp = DEV_OTP;
     const otpHash = await hashString(otp);
@@ -41,8 +43,11 @@ exports.sendOTP = async (req, res, next) => {
       console.warn('Failed to store OTP in database:', dbError.message);
     }
 
-    // No SMS sent - OTP is 0000 for all numbers
-    console.log(`[Dev] OTP for ${phone_number}: ${otp}`);
+    if (phone_number === DEMO_PHONE) {
+      console.log(`[Demo] OTP for ${DEMO_PHONE}: ${DEV_OTP}`);
+    } else {
+      console.log(`[Dev] OTP for ${phone_number}: ${otp}`);
+    }
 
     return sendSuccess(res, 'Verification code sent', {
       otp_id,
@@ -59,7 +64,7 @@ exports.sendOTP = async (req, res, next) => {
  */
 exports.verifyOTP = async (req, res, next) => {
   try {
-    const { otp_id, otp, otp_code, phone_number } = req.body;
+    const { otp_id, otp, otp_code, phone_number: rawPhone } = req.body;
     const otpValue = String(otp || otp_code || '').trim().replace(/\D/g, '');
 
     if (!otpValue) {
@@ -71,9 +76,10 @@ exports.verifyOTP = async (req, res, next) => {
     if (!otp_id) {
       return sendError(res, 'Invalid request. Please request a new code.', 400);
     }
-    if (!phone_number) {
+    if (!rawPhone) {
       return sendError(res, 'Phone number is required', 400);
     }
+    const phone_number = normalizePhoneToIndia(rawPhone) || rawPhone;
 
     // Get OTP from node-cache (primary storage; stored OTP is 0000 for all numbers)
     let authOTP = getOTP(otp_id, phone_number);
@@ -120,10 +126,10 @@ exports.verifyOTP = async (req, res, next) => {
       return sendError(res, 'Invalid verification code. Please check and try again.', 400);
     }
     
-    // Mark OTP as used in cache
-    markOTPAsUsed(otp_id, phone_number);
-    
-    // Also mark as used in database
+    // Delete OTP from cache after successful use (single use, per spec)
+    deleteOTP(otp_id, phone_number);
+
+    // Also mark as used in database (audit)
     try {
       await AuthOTP.updateOne(
         { otp_id, phone_number },
@@ -132,10 +138,13 @@ exports.verifyOTP = async (req, res, next) => {
     } catch (dbError) {
       console.warn('Failed to update OTP in database:', dbError.message);
     }
-    
-    // Find or create user
+
+    // Find or create user (store +91 form; support existing 10-digit stored)
     let isNewUser = false;
     let user = await User.findOne({ phone_number });
+    if (!user && phone_number.startsWith('+91')) {
+      user = await User.findOne({ phone_number: phone_number.slice(3) });
+    }
     if (!user) {
       isNewUser = true;
       user = await User.create({
@@ -145,6 +154,9 @@ exports.verifyOTP = async (req, res, next) => {
       });
     } else {
       user.phone_verified = true;
+      if (user.phone_number !== phone_number && phone_number.startsWith('+91')) {
+        user.phone_number = phone_number;
+      }
       await user.save();
     }
     
@@ -182,14 +194,15 @@ exports.verifyOTP = async (req, res, next) => {
 
 /**
  * Resend OTP (4-digit 0000 for all numbers, stored in node-cache; no SMS sent)
+ * Phone is normalized to +91XXXXXXXXXX in backend.
  */
 exports.resendOTP = async (req, res, next) => {
   try {
-    const { phone_number } = req.body;
-
-    if (!validatePhoneNumber(phone_number)) {
+    const raw = req.body.phone_number;
+    if (!validatePhoneNumber(raw)) {
       return sendError(res, 'Please enter a valid 10-digit phone number', 400);
     }
+    const phone_number = normalizePhoneToIndia(raw) || raw;
 
     const otp = DEV_OTP;
     const otpHash = await hashString(otp);
