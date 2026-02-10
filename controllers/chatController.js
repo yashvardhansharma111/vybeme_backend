@@ -1,6 +1,21 @@
 const { ChatGroup, ChatMessage, PollMessage } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
 
+// In-memory typing indicators: group_id -> { user_id -> lastTypingAt }
+const typingByGroup = new Map();
+const TYPING_TTL_MS = 10000;
+
+function getTypingUsersForGroup(group_id) {
+  const now = Date.now();
+  const groupTyping = typingByGroup.get(group_id);
+  if (!groupTyping) return [];
+  const users = [];
+  for (const [uid, at] of groupTyping.entries()) {
+    if (now - at < TYPING_TTL_MS) users.push(uid);
+  }
+  return users;
+}
+
 /**
  * Create chat group
  * When a new group is created by the same user for the same plan,
@@ -475,8 +490,54 @@ exports.getMessages = async (req, res) => {
         };
       })
     );
-    
-    return sendSuccess(res, 'Messages retrieved successfully', enrichedMessages);
+
+    // Typing indicators: who typed in last TYPING_TTL_MS (for this group)
+    const typingUserIds = getTypingUsersForGroup(group_id);
+    let typing_users = [];
+    if (typingUserIds.length > 0) {
+      const { User } = require('../models');
+      const typingUsers = await User.find({ user_id: { $in: typingUserIds } }).lean();
+      typing_users = typingUsers.map((u) => ({ user_id: u.user_id, name: u.name || 'Someone' }));
+    }
+
+    return sendSuccess(res, 'Messages retrieved successfully', {
+      messages: enrichedMessages,
+      typing_users
+    });
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Notify that the current user is typing in a group (others see this via getMessages).
+ */
+exports.sendTyping = async (req, res) => {
+  try {
+    const { group_id, user_id } = req.body;
+    if (!group_id || !user_id) {
+      return sendError(res, 'group_id and user_id are required', 400);
+    }
+    const group = await ChatGroup.findOne({ group_id }).lean();
+    if (!group) {
+      return sendError(res, 'Chat group not found', 404);
+    }
+    const members = group.members || [];
+    const isMember = members.some((m) => String(m) === String(user_id));
+    if (!isMember) {
+      return sendError(res, 'Not a member of this chat', 403);
+    }
+    if (!typingByGroup.has(group_id)) {
+      typingByGroup.set(group_id, new Map());
+    }
+    const groupTyping = typingByGroup.get(group_id);
+    groupTyping.set(user_id, Date.now());
+    // Prune stale entries for this group
+    const now = Date.now();
+    for (const [uid, at] of groupTyping.entries()) {
+      if (now - at >= TYPING_TTL_MS) groupTyping.delete(uid);
+    }
+    return sendSuccess(res, 'Typing', null);
   } catch (error) {
     return sendError(res, error.message, 500);
   }

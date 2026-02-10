@@ -16,6 +16,7 @@ router.get('/announcement-group/get-or-create', authenticate, chatController.get
 // Message routes
 router.post('/send', authenticate, chatController.sendMessage);
 router.get('/messages/:group_id', authenticate, chatController.getMessages);
+router.post('/typing', authenticate, chatController.sendTyping);
 router.delete('/message/delete/:message_id', authenticate, chatController.deleteMessage);
 
 // Poll routes
