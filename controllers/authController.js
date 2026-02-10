@@ -1,16 +1,17 @@
 const { AuthOTP, User, UserSession } = require('../models');
-const { sendSuccess, sendError, generateId, hashString, validatePhoneNumber, normalizePhoneToIndia } = require('../utils');
+const { sendSuccess, sendError, generateId, hashString, validatePhoneNumber, normalizePhoneToIndia, generateOTP4 } = require('../utils');
 const { generateAccessToken, generateRefreshToken } = require('../utils/jwt');
 const { storeOTP, getOTP, markOTPAsUsed, incrementAttemptCount, deleteOTP } = require('../utils/otpCache');
+const { sendOTP: sendRenflairSMS } = require('../utils/renflairSms');
 
 const OTP_TTL_SECONDS = 600; // 10 minutes
 const MAX_OTP_ATTEMPTS = 5;
-const DEV_OTP = '0000'; // Same OTP for all numbers (no SMS sent)
-const DEMO_PHONE = '+919999999999'; // Dummy number for testing; OTP 0000
+const DEV_OTP = '0000'; // Demo OTP (no SMS)
+const DEMO_PHONE = '+919999999999'; // Dummy number: OTP 0000, no SMS
 
 /**
- * Send OTP (4-digit 0000 for all numbers, stored in node-cache; no SMS sent)
- * Phone is normalized to +91XXXXXXXXXX (Indian) in backend.
+ * Send OTP: demo number gets 0000 (no SMS); all others get random 4-digit OTP via Renflair.
+ * Phone is normalized to +91XXXXXXXXXX in backend.
  */
 exports.sendOTP = async (req, res, next) => {
   try {
@@ -20,7 +21,8 @@ exports.sendOTP = async (req, res, next) => {
     }
     const phone_number = normalizePhoneToIndia(raw) || raw;
 
-    const otp = DEV_OTP;
+    const isDemo = phone_number === DEMO_PHONE;
+    const otp = isDemo ? DEV_OTP : generateOTP4();
     const otpHash = await hashString(otp);
     const otp_id = generateId('otp');
     const expiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
@@ -43,10 +45,13 @@ exports.sendOTP = async (req, res, next) => {
       console.warn('Failed to store OTP in database:', dbError.message);
     }
 
-    if (phone_number === DEMO_PHONE) {
-      console.log(`[Demo] OTP for ${DEMO_PHONE}: ${DEV_OTP}`);
+    if (isDemo) {
+      console.log(`[Demo] OTP for ${DEMO_PHONE}: ${DEV_OTP} (no SMS)`);
     } else {
-      console.log(`[Dev] OTP for ${phone_number}: ${otp}`);
+      const smsResult = await sendRenflairSMS(phone_number, otp);
+      if (!smsResult.success) {
+        return sendError(res, smsResult.message || 'Failed to send verification code. Please try again.', 502);
+      }
     }
 
     return sendSuccess(res, 'Verification code sent', {
@@ -193,8 +198,8 @@ exports.verifyOTP = async (req, res, next) => {
 };
 
 /**
- * Resend OTP (4-digit 0000 for all numbers, stored in node-cache; no SMS sent)
- * Phone is normalized to +91XXXXXXXXXX in backend.
+ * Resend OTP: demo number 0000 (no SMS); others random 4-digit via Renflair.
+ * Phone normalized to +91XXXXXXXXXX in backend.
  */
 exports.resendOTP = async (req, res, next) => {
   try {
@@ -204,7 +209,8 @@ exports.resendOTP = async (req, res, next) => {
     }
     const phone_number = normalizePhoneToIndia(raw) || raw;
 
-    const otp = DEV_OTP;
+    const isDemo = phone_number === DEMO_PHONE;
+    const otp = isDemo ? DEV_OTP : generateOTP4();
     const otpHash = await hashString(otp);
     const otp_id = generateId('otp');
     const expiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
@@ -227,7 +233,14 @@ exports.resendOTP = async (req, res, next) => {
       console.warn('Failed to store OTP in database:', dbError.message);
     }
 
-    console.log(`[Dev] Resent OTP for ${phone_number}: ${otp}`);
+    if (isDemo) {
+      console.log(`[Demo] Resent OTP for ${DEMO_PHONE}: ${DEV_OTP} (no SMS)`);
+    } else {
+      const smsResult = await sendRenflairSMS(phone_number, otp);
+      if (!smsResult.success) {
+        return sendError(res, smsResult.message || 'Failed to send verification code. Please try again.', 502);
+      }
+    }
 
     return sendSuccess(res, 'Verification code sent', { otp_id });
   } catch (error) {

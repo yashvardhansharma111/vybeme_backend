@@ -35,7 +35,9 @@ async function sendOTP(phone, otp) {
     return { success: false, message: 'SMS service is not configured' };
   }
 
-  const normalizedPhone = String(phone).replace(/\D/g, '');
+  const digits = String(phone).replace(/\D/g, '');
+  // Renflair expects 10-digit Indian number (no country code)
+  const normalizedPhone = digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : digits.length === 10 ? digits : digits.slice(-10);
   if (!normalizedPhone || normalizedPhone.length < 10) {
     return { success: false, message: 'Invalid phone number' };
   }
