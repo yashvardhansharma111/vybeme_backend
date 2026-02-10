@@ -12,6 +12,11 @@ const generateOTP = (length = 6) => {
   return Math.floor(100000 + Math.random() * 900000).toString().substring(0, length);
 };
 
+/** Generate a 4-digit OTP (1000–9999) for SMS verification */
+const generateOTP4 = () => {
+  return String(Math.floor(1000 + Math.random() * 9000));
+};
+
 const hashString = async (str) => {
   if (!str || typeof str !== 'string') {
     throw new Error('hashString: Input must be a non-empty string');
@@ -40,6 +45,7 @@ const paginate = (page = 1, limit = 10) => {
 module.exports = {
   generateId,
   generateOTP,
+  generateOTP4,
   hashString,
   calculateDistance,
   paginate

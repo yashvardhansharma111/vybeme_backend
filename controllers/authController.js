@@ -1,33 +1,34 @@
 const { AuthOTP, User, UserSession } = require('../models');
-const { sendSuccess, sendError, generateId, hashString, validatePhoneNumber } = require('../utils');
+const { sendSuccess, sendError, generateId, hashString, validatePhoneNumber, generateOTP4 } = require('../utils');
 const { generateAccessToken, generateRefreshToken } = require('../utils/jwt');
 const { storeOTP, getOTP, markOTPAsUsed, incrementAttemptCount } = require('../utils/otpCache');
+const { sendOTP: sendRenflairSMS } = require('../utils/renflairSms');
+
+const OTP_TTL_SECONDS = 600; // 10 minutes
+const MAX_OTP_ATTEMPTS = 5;
+const DUMMY_PHONE = '9999988888'; // Play Store / testing: accept OTP 0000
 
 /**
- * Send OTP
+ * Send OTP (4-digit, sent via Renflair SMS, stored in node-cache)
  */
 exports.sendOTP = async (req, res, next) => {
   try {
     const { phone_number } = req.body;
-    
+
     if (!validatePhoneNumber(phone_number)) {
-      return sendError(res, 'Invalid phone number', 400);
+      return sendError(res, 'Please enter a valid 10-digit phone number', 400);
     }
-    
-    // All OTPs are 000000 (no random generation)
-    const otp = '000000';
+
+    const otp = generateOTP4();
     const otpHash = await hashString(otp);
     const otp_id = generateId('otp');
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-    
-    // Store OTP in node-cache with TTL (10 minutes = 600 seconds)
-    const stored = storeOTP(otp_id, phone_number, otpHash, 600);
-    
+    const expiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
+
+    const stored = storeOTP(otp_id, phone_number, otpHash, OTP_TTL_SECONDS);
     if (!stored) {
-      return sendError(res, 'Failed to store OTP', 500);
+      return sendError(res, 'Unable to create verification code. Please try again.', 500);
     }
-    
-    // Also store in MongoDB for audit/logging (optional)
+
     try {
       await AuthOTP.create({
         otp_id,
@@ -38,19 +39,26 @@ exports.sendOTP = async (req, res, next) => {
         used: false
       });
     } catch (dbError) {
-      // Log but don't fail - cache is primary storage
       console.warn('Failed to store OTP in database:', dbError.message);
     }
-    
-    // In production, send OTP via SMS service
-    console.log(`OTP for ${phone_number}: ${otp}`);
-    
-    return sendSuccess(res, 'OTP sent successfully', {
-      otp_id: otp_id,
+
+    // Send via Renflair (skip for dummy phone so we don't hit API)
+    if (phone_number !== DUMMY_PHONE) {
+      const smsResult = await sendRenflairSMS(phone_number, otp);
+      if (!smsResult.success) {
+        return sendError(res, smsResult.message || 'Failed to send verification code. Please try again.', 502);
+      }
+    } else {
+      console.log(`[Dev] OTP for ${phone_number}: ${otp}`);
+    }
+
+    return sendSuccess(res, 'Verification code sent', {
+      otp_id,
       expires_at: expiresAt
     });
   } catch (error) {
-    return sendError(res, error.message, 500);
+    console.error('Send OTP error:', error);
+    return sendError(res, 'Something went wrong. Please try again.', 500);
   }
 };
 
@@ -60,27 +68,23 @@ exports.sendOTP = async (req, res, next) => {
 exports.verifyOTP = async (req, res, next) => {
   try {
     const { otp_id, otp, otp_code, phone_number } = req.body;
-    
-    // Support both 'otp' and 'otp_code' field names
-    const otpValue = otp || otp_code;
-    
+    const otpValue = String(otp || otp_code || '').trim().replace(/\D/g, '');
+
     if (!otpValue) {
-      return sendError(res, 'OTP code is required', 400);
+      return sendError(res, 'Please enter the 4-digit verification code', 400);
     }
-    
+    if (otpValue.length !== 4) {
+      return sendError(res, 'Verification code must be 4 digits', 400);
+    }
     if (!otp_id) {
-      return sendError(res, 'OTP ID is required', 400);
+      return sendError(res, 'Invalid request. Please request a new code.', 400);
     }
-    
     if (!phone_number) {
       return sendError(res, 'Phone number is required', 400);
     }
-    
-    // Dummy phone number for Play Store testing - always accept OTP 000000
-    const DUMMY_PHONE = '9999988888';
-    const DUMMY_OTP = '000000';
-    
-    // For dummy phone with correct OTP, bypass all checks
+
+    const DUMMY_OTP = '0000';
+
     if (phone_number === DUMMY_PHONE && otpValue === DUMMY_OTP) {
       // Skip OTP validation for dummy phone - proceed directly to user creation/login
       let isNewUser = false;
@@ -130,12 +134,10 @@ exports.verifyOTP = async (req, res, next) => {
       // If not in cache, check MongoDB (for backward compatibility)
       const dbOTP = await AuthOTP.findOne({ otp_id, phone_number });
       if (!dbOTP) {
-        return sendError(res, 'Invalid OTP ID or phone number', 400);
+        return sendError(res, 'Invalid or expired code. Please request a new one.', 400);
       }
-      
-      // Check if expired
       if (new Date() > dbOTP.expires_at) {
-        return sendError(res, 'OTP expired', 400);
+        return sendError(res, 'This code has expired. Please request a new one.', 400);
       }
       
       // Convert to cache format
@@ -149,25 +151,16 @@ exports.verifyOTP = async (req, res, next) => {
       };
     }
     
-    // Check if already used
     if (authOTP.used) {
-      return sendError(res, 'OTP already used', 400);
+      return sendError(res, 'This code has already been used. Please request a new one.', 400);
     }
-    
-    // Check attempt count
-    if (authOTP.attempt_count >= 5) {
-      return sendError(res, 'Too many attempts', 429);
+    if (authOTP.attempt_count >= MAX_OTP_ATTEMPTS) {
+      return sendError(res, 'Too many wrong attempts. Please request a new code.', 429);
     }
-    
-    // Verify OTP
+
     const otpHash = await hashString(otpValue);
-    const isValidOTP = (otpHash === authOTP.otp_hash);
-    
-    if (!isValidOTP) {
-      // Increment attempt count in cache
+    if (otpHash !== authOTP.otp_hash) {
       incrementAttemptCount(otp_id, phone_number);
-      
-      // Also update in database
       try {
         await AuthOTP.updateOne(
           { otp_id, phone_number },
@@ -176,8 +169,7 @@ exports.verifyOTP = async (req, res, next) => {
       } catch (dbError) {
         console.warn('Failed to update attempt count in database:', dbError.message);
       }
-      
-      return sendError(res, 'Invalid OTP', 400);
+      return sendError(res, 'Invalid verification code. Please check and try again.', 400);
     }
     
     // Mark OTP as used in cache
@@ -234,38 +226,33 @@ exports.verifyOTP = async (req, res, next) => {
     });
   } catch (error) {
     console.error('Verify OTP Error:', error);
-    console.error('Error Stack:', error.stack);
     if (!res.headersSent) {
-      return sendError(res, error.message || 'Internal server error', 500);
+      return sendError(res, 'Something went wrong. Please try again.', 500);
     }
   }
 };
 
 /**
- * Resend OTP
+ * Resend OTP (4-digit, via Renflair, stored in node-cache)
  */
 exports.resendOTP = async (req, res, next) => {
   try {
     const { phone_number } = req.body;
-    
+
     if (!validatePhoneNumber(phone_number)) {
-      return sendError(res, 'Invalid phone number', 400);
+      return sendError(res, 'Please enter a valid 10-digit phone number', 400);
     }
-    
-    // All OTPs are 000000 (no random generation)
-    const otp = '000000';
+
+    const otp = generateOTP4();
     const otpHash = await hashString(otp);
     const otp_id = generateId('otp');
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-    
-    // Store OTP in node-cache with TTL
-    const stored = storeOTP(otp_id, phone_number, otpHash, 600);
-    
+    const expiresAt = new Date(Date.now() + OTP_TTL_SECONDS * 1000);
+
+    const stored = storeOTP(otp_id, phone_number, otpHash, OTP_TTL_SECONDS);
     if (!stored) {
-      return sendError(res, 'Failed to store OTP', 500);
+      return sendError(res, 'Unable to create verification code. Please try again.', 500);
     }
-    
-    // Also store in MongoDB for audit
+
     try {
       await AuthOTP.create({
         otp_id,
@@ -278,14 +265,20 @@ exports.resendOTP = async (req, res, next) => {
     } catch (dbError) {
       console.warn('Failed to store OTP in database:', dbError.message);
     }
-    
-    console.log(`Resent OTP for ${phone_number}: ${otp}`);
-    
-    return sendSuccess(res, 'OTP resent successfully', {
-      otp_id: otp_id
-    });
+
+    if (phone_number !== DUMMY_PHONE) {
+      const smsResult = await sendRenflairSMS(phone_number, otp);
+      if (!smsResult.success) {
+        return sendError(res, smsResult.message || 'Failed to send verification code. Please try again.', 502);
+      }
+    } else {
+      console.log(`[Dev] Resent OTP for ${phone_number}: ${otp}`);
+    }
+
+    return sendSuccess(res, 'Verification code sent', { otp_id });
   } catch (error) {
-    return sendError(res, error.message, 500);
+    console.error('Resend OTP error:', error);
+    return sendError(res, 'Something went wrong. Please try again.', 500);
   }
 };
 
