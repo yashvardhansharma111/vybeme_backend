@@ -91,7 +91,7 @@ exports.getUserProfile = async (req, res) => {
 exports.updateProfile = async (req, res) => {
   try {
     const { session_id } = req.body;
-    const { name, profile_image, bio, gender } = req.body;
+    const { name, profile_image, bio, gender, is_business } = req.body;
     
     const session = await UserSession.findOne({ session_id });
     if (!session || !session.user_id) {
@@ -107,6 +107,7 @@ exports.updateProfile = async (req, res) => {
     if (profile_image !== undefined) user.profile_image = profile_image;
     if (bio !== undefined) user.bio = bio;
     if (gender !== undefined) user.gender = gender;
+    if (is_business !== undefined) user.is_business = !!is_business;
     if (req.body.interests !== undefined) user.interests = req.body.interests;
     if (req.body.social_media !== undefined) {
       const sm = req.body.social_media;
