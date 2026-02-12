@@ -52,8 +52,8 @@ exports.registerForEvent = async (req, res) => {
 
     if (plan.is_women_only) {
       const registeringUser = await User.findOne({ user_id }).lean();
-      const gender = (registeringUser?.gender || '').toLowerCase();
-      if (gender !== 'female') {
+      const profileGender = (registeringUser?.gender || '').toLowerCase();
+      if (profileGender !== 'female') {
         return sendError(res, 'Only women can register for this event', 403);
       }
     }
@@ -64,7 +64,11 @@ exports.registerForEvent = async (req, res) => {
       return sendError(res, 'You cannot register for your own event', 403);
     }
 
-    // Multiple booking per person allowed: each call creates a new ticket/registration (no "already registered" check).
+    // One registration per user per plan
+    const existing = await Registration.findOne({ plan_id, user_id }).lean();
+    if (existing) {
+      return sendError(res, 'You have already registered for this event', 400);
+    }
 
     // Get pass details if pass_id provided
     let pricePaid = 0;
