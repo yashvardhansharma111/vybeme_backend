@@ -55,6 +55,22 @@ const registrationSchema = new mongoose.Schema({
     type: String,
     default: null // Optional message from user
   },
+  age_range: {
+    type: String,
+    default: null // e.g. "Under 18yrs", "18-24yrs", "25-34yrs", "35-44yrs", "above 45yrs"
+  },
+  gender: {
+    type: String,
+    default: null // e.g. "Male", "Female", "Prefer not to say"
+  },
+  running_experience: {
+    type: String,
+    default: null // e.g. "This will be my first time.", "I run occasionally", etc.
+  },
+  what_brings_you: {
+    type: String,
+    default: null // Free text: what brings you to BREATHE?
+  },
   created_at: {
     type: Date,
     default: Date.now

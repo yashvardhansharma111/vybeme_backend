@@ -365,7 +365,7 @@ exports.getBusinessPostDetails = async (req, res) => {
 };
 
 /**
- * Get registration analytics
+ * Get registration analytics (count from Registration collection for accuracy)
  */
 exports.getRegistrations = async (req, res) => {
   try {
@@ -375,11 +375,19 @@ exports.getRegistrations = async (req, res) => {
     if (!plan) {
       return sendError(res, 'Business post not found', 404);
     }
+
+    const { Registration } = require('../models');
+    const total = await Registration.countDocuments({
+      plan_id: post_id,
+      status: { $in: ['pending', 'approved'] }
+    });
+    const approved = await Registration.countDocuments({ plan_id: post_id, status: 'approved' });
+    const rejected = await Registration.countDocuments({ plan_id: post_id, status: 'rejected' });
     
     return sendSuccess(res, 'Registration analytics retrieved successfully', {
-      total_registrations: plan.approved_registrations + plan.rejected_registrations,
-      approved_registrations: plan.approved_registrations,
-      rejected_registrations: plan.rejected_registrations
+      total_registrations: total,
+      approved_registrations: approved,
+      rejected_registrations: rejected
     });
   } catch (error) {
     return sendError(res, error.message, 500);

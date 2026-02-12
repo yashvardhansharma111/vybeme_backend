@@ -34,7 +34,7 @@ function generateQRCodeData(ticketId, planId, userId) {
  */
 exports.registerForEvent = async (req, res) => {
   try {
-    const { plan_id, user_id, pass_id, message } = req.body;
+    const { plan_id, user_id, pass_id, message, age_range, gender, running_experience, what_brings_you } = req.body;
     
     if (!plan_id || !user_id) {
       return sendError(res, 'plan_id and user_id are required', 400);
@@ -57,21 +57,15 @@ exports.registerForEvent = async (req, res) => {
         return sendError(res, 'Only women can register for this event', 403);
       }
     }
-    
-    // Check if user already registered
-    const existingRegistration = await Registration.findOne({ plan_id, user_id });
-    if (existingRegistration) {
-      // If already has a ticket, return it
-      if (existingRegistration.ticket_id) {
-        const ticket = await Ticket.findOne({ ticket_id: existingRegistration.ticket_id });
-        return sendSuccess(res, 'Already registered', {
-          registration: existingRegistration,
-          ticket: ticket
-        });
-      }
-      return sendError(res, 'Already registered for this event', 400);
+
+    // Business user cannot register for their own plan
+    const planOwnerId = plan.user_id || plan.business_id;
+    if (planOwnerId && planOwnerId === user_id) {
+      return sendError(res, 'You cannot register for your own event', 403);
     }
-    
+
+    // Multiple booking per person allowed: each call creates a new ticket/registration (no "already registered" check).
+
     // Get pass details if pass_id provided
     let pricePaid = 0;
     let selectedPass = null;
@@ -100,7 +94,7 @@ exports.registerForEvent = async (req, res) => {
       price_paid: pricePaid
     });
     
-    // Create registration
+    // Create registration (with optional survey: age_range, gender, running_experience, what_brings_you)
     const registration = await Registration.create({
       registration_id: generateId('registration'),
       plan_id,
@@ -109,7 +103,11 @@ exports.registerForEvent = async (req, res) => {
       ticket_id: ticketId,
       status: plan.registration_required ? 'pending' : 'approved',
       price_paid: pricePaid,
-      message: message || null
+      message: message || null,
+      age_range: age_range || null,
+      gender: gender || null,
+      running_experience: running_experience || null,
+      what_brings_you: what_brings_you || null
     });
     
     // Update plan registration counts
@@ -648,7 +646,11 @@ exports.getAttendeeList = async (req, res) => {
           checked_in_at: reg.checked_in_at || ticket?.checked_in_at || null,
           checked_in_via: reg.checked_in_via || null,
           price_paid: reg.price_paid,
-          created_at: reg.created_at
+          created_at: reg.created_at,
+          age_range: reg.age_range || null,
+          gender: reg.gender || null,
+          running_experience: reg.running_experience || null,
+          what_brings_you: reg.what_brings_you || null
         };
       })
     );
