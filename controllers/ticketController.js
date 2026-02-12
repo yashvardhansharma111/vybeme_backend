@@ -213,12 +213,12 @@ exports.registerForEvent = async (req, res) => {
     const user = await User.findOne({ user_id }).lean();
 
     // Notify plan/business owner when someone registers (unless they're notifying themselves)
-    const planOwnerId = plan.user_id || plan.business_id;
-    if (planOwnerId && planOwnerId !== user_id) {
+    const ownerId = plan.user_id || plan.business_id;
+    if (ownerId && ownerId !== user_id) {
       try {
         await Notification.create({
           notification_id: generateId('notification'),
-          user_id: planOwnerId,
+          user_id: ownerId,
           type: 'join',
           source_plan_id: plan_id,
           source_user_id: user_id,
