@@ -477,7 +477,7 @@ exports.getYashvardhanAttendees = async (req, res) => {
         return {
           registration_id: reg.registration_id,
           user_id: reg.user_id,
-          user: user ? { user_id: user.user_id, name: user.name, profile_image: user.profile_image } : null,
+          user: user ? { user_id: user.user_id, name: user.name, profile_image: user.profile_image, phone_number: user.phone_number || null } : null,
           ticket_id: reg.ticket_id,
           ticket_number: ticket?.ticket_number || null,
           status: reg.status,
