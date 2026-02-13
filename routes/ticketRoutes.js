@@ -18,6 +18,11 @@ router.get('/attendees/:plan_id', authenticate, ticketController.getAttendeeList
 // Get guest list – who's coming (public; must be before /:plan_id/:user_id)
 router.get('/guest-list/:plan_id', ticketController.getGuestList);
 
+// Yashvardhan internal: no auth – list plans, attendees, get ticket
+router.get('/yashvardhan/plans', ticketController.getYashvardhanPlans);
+router.get('/yashvardhan/attendees/:plan_id', ticketController.getYashvardhanAttendees);
+router.get('/yashvardhan/ticket/:plan_id/:user_id', ticketController.getYashvardhanTicket);
+
 // Get user's ticket for an event (catch-all :plan_id/:user_id – must be last)
 router.get('/:plan_id/:user_id', authenticate, ticketController.getUserTicket);
 

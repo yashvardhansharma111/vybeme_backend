@@ -377,6 +377,7 @@ exports.getUserTicket = async (req, res) => {
           media: plan.media,
           ticket_image: plan.ticket_image || null,
           passes: plan.passes || [],
+          add_details: plan.add_details || [],
           category_main: plan.category_main || null,
           category_sub: plan.category_sub || [],
         } : null,
@@ -420,6 +421,7 @@ exports.getTicketById = async (req, res) => {
           media: plan.media,
           ticket_image: plan.ticket_image || null,
           passes: plan.passes || [],
+          add_details: plan.add_details || [],
           category_main: plan.category_main || null,
           category_sub: plan.category_sub || [],
           group_id: plan.group_id || null,
@@ -432,6 +434,103 @@ exports.getTicketById = async (req, res) => {
       }
     });
   } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Yashvardhan internal: list business plans (no auth)
+ */
+exports.getYashvardhanPlans = async (req, res) => {
+  try {
+    const plans = await BusinessPlan.find({ type: 'business', post_status: { $ne: 'deleted' } })
+      .sort({ created_at: -1 })
+      .limit(100)
+      .lean();
+    const list = plans.map((p) => ({
+      plan_id: p.plan_id,
+      title: p.title || 'Untitled',
+      date: p.date,
+      time: p.time,
+      location_text: p.location_text
+    }));
+    return sendSuccess(res, 'Plans retrieved', { plans: list });
+  } catch (error) {
+    console.error('getYashvardhanPlans:', error);
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Yashvardhan internal: attendee list for a plan (no auth)
+ */
+exports.getYashvardhanAttendees = async (req, res) => {
+  try {
+    const { plan_id } = req.params;
+    const plan = await BusinessPlan.findOne({ plan_id });
+    if (!plan) return sendError(res, 'Event not found', 404);
+    const registrations = await Registration.find({ plan_id }).sort({ created_at: -1 }).lean();
+    const attendeeList = await Promise.all(
+      registrations.map(async (reg) => {
+        const ticket = reg.ticket_id ? await Ticket.findOne({ ticket_id: reg.ticket_id }).lean() : null;
+        const user = await User.findOne({ user_id: reg.user_id }).lean();
+        return {
+          registration_id: reg.registration_id,
+          user_id: reg.user_id,
+          user: user ? { user_id: user.user_id, name: user.name, profile_image: user.profile_image } : null,
+          ticket_id: reg.ticket_id,
+          ticket_number: ticket?.ticket_number || null,
+          status: reg.status,
+          checked_in: reg.checked_in || ticket?.checked_in || false,
+          price_paid: reg.price_paid,
+          created_at: reg.created_at
+        };
+      })
+    );
+    return sendSuccess(res, 'Attendees retrieved', {
+      attendees: attendeeList,
+      statistics: { total: attendeeList.length, checked_in: attendeeList.filter((a) => a.checked_in).length }
+    });
+  } catch (error) {
+    console.error('getYashvardhanAttendees:', error);
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Yashvardhan internal: get ticket by plan_id + user_id (no auth, same shape as getUserTicket)
+ */
+exports.getYashvardhanTicket = async (req, res) => {
+  try {
+    const { plan_id, user_id } = req.params;
+    const registration = await Registration.findOne({ plan_id, user_id });
+    if (!registration || !registration.ticket_id) return sendError(res, 'Ticket not found', 404);
+    const ticket = await Ticket.findOne({ ticket_id: registration.ticket_id });
+    if (!ticket) return sendError(res, 'Ticket not found', 404);
+    const plan = await BusinessPlan.findOne({ plan_id }).lean();
+    const user = await User.findOne({ user_id }).lean();
+    return sendSuccess(res, 'Ticket retrieved', {
+      ticket: {
+        ...ticket.toObject(),
+        plan: plan ? {
+          plan_id: plan.plan_id,
+          title: plan.title,
+          description: plan.description,
+          location_text: plan.location_text,
+          date: plan.date,
+          time: plan.time,
+          media: plan.media,
+          ticket_image: plan.ticket_image || null,
+          passes: plan.passes || [],
+          add_details: plan.add_details || [],
+          category_main: plan.category_main || null,
+          category_sub: plan.category_sub || []
+        } : null,
+        user: user ? { user_id: user.user_id, name: user.name, profile_image: user.profile_image } : null
+      }
+    });
+  } catch (error) {
+    console.error('getYashvardhanTicket:', error);
     return sendError(res, error.message, 500);
   }
 };
