@@ -41,56 +41,47 @@ const generateObjectKey = (file, folder = 'vybeme/posts') => {
 
 /**
  * Get file metadata (dimensions, size, format)
- * Supports both file buffer (memoryStorage) and file path (diskStorage)
+ * Supports file buffer (memoryStorage), file path (diskStorage), or bufferOverride to avoid re-reading from disk
  */
-const getFileMetadata = async (file, mimetype) => {
+const getFileMetadata = async (file, mimetype, bufferOverride = null) => {
   let size = null;
   let width = null;
   let height = null;
   let format = null;
-  
+  const buffer = bufferOverride || file.buffer;
+
   // Get file size
-  if (file.buffer) {
-    // Memory storage - use buffer
-    size = file.buffer.length;
+  if (buffer) {
+    size = buffer.length;
   } else if (file.path) {
-    // Disk storage - read from file
     const stats = fs.statSync(file.path);
     size = stats.size;
   } else if (file.size) {
-    // Fallback to file.size if available
     size = file.size;
   }
-  
-  // Try to get image dimensions if it's an image
+
+  // Try to get image dimensions if it's an image (use buffer when available to avoid extra disk read)
   if (mimetype && mimetype.startsWith('image/')) {
     try {
       const sharp = require('sharp');
       let metadata;
-      
-      if (file.buffer) {
-        // Use buffer directly (faster)
-        metadata = await sharp(file.buffer).metadata();
+      if (buffer) {
+        metadata = await sharp(buffer).metadata();
       } else if (file.path) {
-        // Read from disk
         metadata = await sharp(file.path).metadata();
       }
-      
       if (metadata) {
         width = metadata.width;
         height = metadata.height;
         format = metadata.format;
       }
     } catch (error) {
-      // If sharp fails, extract format from mimetype
       format = mimetype.split('/')[1]?.split('+')[0] || 'unknown';
     }
   } else if (mimetype && mimetype.startsWith('video/')) {
     format = mimetype.split('/')[1] || 'unknown';
-    // Note: Video duration would require ffmpeg - not implemented
-    // Duration field removed from return value
   }
-  
+
   return { width, height, format, size };
 };
 
@@ -124,10 +115,10 @@ const uploadFile = async (file, folder = 'vybeme/posts', isVideo = false) => {
     });
     
     await s3Client.send(command);
-    
-    // Get file metadata (supports both buffer and file path)
-    const metadata = await getFileMetadata(file, file.mimetype);
-    
+
+    // Use existing buffer for metadata to avoid reading from disk again
+    const metadata = await getFileMetadata(file, file.mimetype, fileBuffer);
+
     // Generate public URL
     const url = getPublicUrl(objectKey);
     

@@ -42,12 +42,21 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// Configure multer
+// Same limits and filter for both disk and memory
+const multerLimits = { fileSize: 50 * 1024 * 1024 }; // 50MB max per file
+
+// Configure multer (disk storage - for routes that need files on disk)
 const upload = multer({
   storage: storage,
-  limits: {
-    fileSize: 50 * 1024 * 1024 // 50MB max file size
-  },
+  limits: multerLimits,
+  fileFilter: fileFilter
+});
+
+// Memory storage - no disk I/O; faster for post create (files go straight to R2 from buffer)
+const memoryStorage = multer.memoryStorage();
+const uploadMemory = multer({
+  storage: memoryStorage,
+  limits: multerLimits,
   fileFilter: fileFilter
 });
 
@@ -124,11 +133,21 @@ const uploadMultiple = (fieldName = 'files', maxCount = 10) => {
       if (err) {
         return handleMulterError(err, req, res, next);
       }
-      // If no files uploaded, that's okay - continue
-      // req.files will be undefined or empty array
-      if (!req.files) {
-        req.files = [];
+      if (!req.files) req.files = [];
+      next();
+    });
+  };
+};
+
+// Multiple files into memory (faster for post create - no disk write/read)
+const uploadMultipleMemory = (fieldName = 'files', maxCount = 10) => {
+  return (req, res, next) => {
+    const middleware = uploadMemory.array(fieldName, maxCount);
+    middleware(req, res, (err) => {
+      if (err) {
+        return handleMulterError(err, req, res, next);
       }
+      if (!req.files) req.files = [];
       next();
     });
   };
@@ -138,6 +157,18 @@ const uploadMultiple = (fieldName = 'files', maxCount = 10) => {
 const uploadFields = (fields) => {
   return (req, res, next) => {
     upload.fields(fields)(req, res, (err) => {
+      if (err) {
+        return handleMulterError(err, req, res, next);
+      }
+      next();
+    });
+  };
+};
+
+// Multiple fields into memory (faster for business post create)
+const uploadFieldsMemory = (fields) => {
+  return (req, res, next) => {
+    uploadMemory.fields(fields)(req, res, (err) => {
       if (err) {
         return handleMulterError(err, req, res, next);
       }
@@ -159,7 +190,9 @@ module.exports = {
   upload,
   uploadSingle,
   uploadMultiple,
+  uploadMultipleMemory,
   uploadFields,
+  uploadFieldsMemory,
   cleanupFile
 };
 
