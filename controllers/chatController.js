@@ -811,7 +811,6 @@ exports.getChatLists = async (req, res) => {
         author_id: plan.user_id,
         author_name: author?.name || 'Unknown',
         author_image: author?.profile_image || null,
-        // For individual chats, include other user info
         other_user: otherUser ? {
           user_id: otherUser.user_id,
           name: otherUser.name,
@@ -825,7 +824,8 @@ exports.getChatLists = async (req, res) => {
         } : null,
         member_count: group.members.length,
         is_group: group.members.length > 2,
-        group_name: group.group_name || (group.members.length === 2 && otherUser ? otherUser.name : plan.title)
+        group_name: group.group_name || (group.members.length === 2 && otherUser ? otherUser.name : plan.title),
+        unread_count: 0 // TODO: implement per-group read tracking for real unread counts
       };
       
       // Check if this is a business plan - business plan groups should always be in "groups" section
@@ -884,6 +884,24 @@ exports.getChatLists = async (req, res) => {
       my_plans: myPlans,
       groups: groups
     });
+  } catch (error) {
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Get total chat unread count for the user (for tab badge).
+ * Returns 0 until per-group read tracking is implemented.
+ */
+exports.getUnreadCounter = async (req, res) => {
+  try {
+    const { user_id } = req.query;
+    if (!user_id) {
+      return sendError(res, 'user_id is required', 400);
+    }
+    // TODO: implement read tracking (e.g. last_read per user per group) and sum unread per group
+    const unread_count = 0;
+    return sendSuccess(res, 'Unread count retrieved', { unread_count });
   } catch (error) {
     return sendError(res, error.message, 500);
   }

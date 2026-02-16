@@ -26,6 +26,8 @@ router.get('/poll/results/:poll_id', authenticate, chatController.getPollResults
 
 // Chat lists
 router.get('/lists', authenticate, chatController.getChatLists);
+router.get('/unread-counter', authenticate, chatController.getUnreadCounter);
+router.get('/unread/counter', authenticate, chatController.getUnreadCounter);
 
 // Reactions
 router.post('/message/reaction', authenticate, chatController.addReaction);

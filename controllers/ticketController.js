@@ -192,15 +192,8 @@ exports.registerForEvent = async (req, res) => {
           content: `Welcome to the group for ${plan.title}`,
           reactions: []
         });
-        await ChatMessage.create({
-          message_id: generateId('msg'),
-          group_id: newGroup.group_id,
-          user_id,
-          type: 'text',
-          content: 'Hi',
-          reactions: [],
-        });
-        
+        // Automatic "Hi" from joiner disabled – no message sent on behalf of the new member
+
         await BasePlan.updateOne(
           { plan_id: plan.plan_id },
           { $inc: { chat_message_count: 1 } }
