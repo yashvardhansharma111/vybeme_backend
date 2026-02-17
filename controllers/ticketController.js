@@ -898,7 +898,8 @@ exports.createOrder = async (req, res) => {
     }
 
     const amountPaise = Math.round(amount * 100);
-    const receipt = `vybeme_${plan_id}_${user_id}_${Date.now()}`;
+    // Razorpay receipt must be ≤40 chars; we store plan_id/user_id in PaymentOrder
+    const receipt = `v_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`.slice(0, 40);
 
     const razorpay = getRazorpayInstance();
     const order = await razorpay.orders.create({
