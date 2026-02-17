@@ -3,6 +3,7 @@ const CategoryTag = require('../models/other/CategoryTag');
 const { sendSuccess, sendError, generateId } = require('../utils');
 const { uploadImage, uploadVideo } = require('../config/cloudinary');
 const { cleanupFile } = require('../middleware/upload');
+const { refundPaidTicketsForPlan } = require('./ticketController');
 
 // req.files from multer.fields() is an object { files: [...], ticket_image: [...] }, not an array
 function getAllFiles(files) {
@@ -334,10 +335,24 @@ exports.updateBusinessPost = async (req, res) => {
     
     // Remove files from update data
     delete updateData.files;
-    
+
+    const wasDeleted = updateData.post_status === 'deleted';
+    const refundPaidTickets = req.body.refund_paid_tickets === true || req.body.refund_paid_tickets === 'true';
     Object.assign(plan, updateData);
     await plan.save();
-    
+
+    // Only when event is explicitly CANCELLED (refund_paid_tickets: true), refund paid tickets.
+    // When event is just DELETED (e.g. after event is done), do not refund.
+    if (wasDeleted && refundPaidTickets && plan.plan_id) {
+      refundPaidTicketsForPlan(plan.plan_id)
+        .then((result) => {
+          if (result.refunded > 0 || result.failed > 0) {
+            console.log(`[businessPost] Auto-refund on cancel plan ${plan.plan_id}: refunded=${result.refunded}, failed=${result.failed}`);
+          }
+        })
+        .catch((err) => console.error('[businessPost] Auto-refund on cancel failed:', err.message));
+    }
+
     return sendSuccess(res, 'Business post updated successfully', plan);
   } catch (error) {
     const allFiles = getAllFiles(req.files);

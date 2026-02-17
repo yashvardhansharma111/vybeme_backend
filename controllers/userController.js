@@ -23,6 +23,7 @@ exports.getMe = async (req, res) => {
       user_id: user.user_id,
       name: user.name,
       profile_image: user.profile_image,
+      phone_number: user.phone_number || null,
       bio: user.bio,
       gender: user.gender,
       interests: user.interests || [],

@@ -1117,6 +1117,43 @@ exports.handleRazorpayWebhook = async (req, res) => {
 };
 
 /**
+ * Refund all paid tickets for a plan (Razorpay). Used when event is cancelled or by refund API.
+ * Returns { refunded, failed, errors }. Does not throw; logs and returns on Razorpay errors.
+ */
+async function refundPaidTicketsForPlan(plan_id) {
+  const results = { refunded: 0, failed: 0, errors: [] };
+  try {
+    const paidRegistrations = await Registration.find({
+      plan_id,
+      status: { $in: ['pending', 'approved'] },
+      razorpay_payment_id: { $exists: true, $ne: null, $ne: '' },
+    }).lean();
+
+    if (paidRegistrations.length === 0) return results;
+
+    const razorpay = getRazorpayInstance();
+    for (const reg of paidRegistrations) {
+      try {
+        await razorpay.payments.refund(reg.razorpay_payment_id, { amount: Math.round((reg.price_paid || 0) * 100) });
+        results.refunded += 1;
+      } catch (e) {
+        results.failed += 1;
+        results.errors.push({ registration_id: reg.registration_id, message: e.message || String(e) });
+      }
+    }
+    if (results.refunded > 0 || results.failed > 0) {
+      console.log(`[refund] Plan ${plan_id}: refunded=${results.refunded}, failed=${results.failed}`);
+    }
+  } catch (error) {
+    console.error('[refund] refundPaidTicketsForPlan error:', error.message);
+    results.errors.push({ message: error.message || String(error) });
+  }
+  return results;
+}
+
+exports.refundPaidTicketsForPlan = refundPaidTicketsForPlan;
+
+/**
  * Refund all paid tickets for a plan (e.g. when event is cancelled). Call Razorpay refund API for each payment.
  */
 exports.refundAllForPlan = async (req, res) => {
@@ -1131,24 +1168,7 @@ exports.refundAllForPlan = async (req, res) => {
     if (user_id && ownerId !== user_id) {
       return sendError(res, 'Only the event organizer can refund tickets', 403);
     }
-
-    const paidRegistrations = await Registration.find({
-      plan_id,
-      status: { $in: ['pending', 'approved'] },
-      razorpay_payment_id: { $exists: true, $ne: null, $ne: '' },
-    }).lean();
-
-    const razorpay = getRazorpayInstance();
-    const results = { refunded: 0, failed: 0, errors: [] };
-    for (const reg of paidRegistrations) {
-      try {
-        await razorpay.payments.refund(reg.razorpay_payment_id, { amount: Math.round((reg.price_paid || 0) * 100) });
-        results.refunded += 1;
-      } catch (e) {
-        results.failed += 1;
-        results.errors.push({ registration_id: reg.registration_id, message: e.message || String(e) });
-      }
-    }
+    const results = await refundPaidTicketsForPlan(plan_id);
     return sendSuccess(res, 'Refund initiated for paid tickets', results);
   } catch (error) {
     console.error('refundAllForPlan error:', error);
