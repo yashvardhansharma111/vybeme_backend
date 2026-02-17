@@ -221,6 +221,7 @@ exports.getOverallAnalytics = async (req, res) => {
           checked_in_count: check_in,
           showup_rate_percent: reg_count > 0 ? Math.round((check_in / reg_count) * 10000) / 100 : 0,
           revenue: Math.round(rev * 100) / 100,
+          media: p.media && Array.isArray(p.media) ? p.media : [],
         };
       })
     );
