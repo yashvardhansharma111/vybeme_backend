@@ -6,6 +6,7 @@ const Repost = require('./Repost');
 const SavedPlan = require('./SavedPlan');
 const Ticket = require('./Ticket');
 const Registration = require('./Registration');
+const PaymentOrder = require('./PaymentOrder');
 
 module.exports = {
   BasePlan,
@@ -15,6 +16,7 @@ module.exports = {
   Repost,
   SavedPlan,
   Ticket,
-  Registration
+  Registration,
+  PaymentOrder
 };
 

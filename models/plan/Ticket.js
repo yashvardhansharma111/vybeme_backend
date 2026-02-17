@@ -63,7 +63,9 @@ const ticketSchema = new mongoose.Schema({
   expires_at: {
     type: Date,
     default: null // Optional: ticket expiration
-  }
+  },
+  razorpay_order_id: { type: String, default: null },
+  razorpay_payment_id: { type: String, default: null }
 });
 
 ticketSchema.index({ plan_id: 1, user_id: 1 });

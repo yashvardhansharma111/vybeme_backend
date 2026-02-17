@@ -1,5 +1,7 @@
 const crypto = require('crypto');
-const { Ticket, Registration, BusinessPlan, User, ChatGroup, Notification } = require('../models');
+const Razorpay = require('razorpay');
+const config = require('../config');
+const { Ticket, Registration, BusinessPlan, User, ChatGroup, Notification, PaymentOrder } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
 
 /**
@@ -77,9 +79,12 @@ exports.registerForEvent = async (req, res) => {
       selectedPass = plan.passes.find(p => p.pass_id === pass_id);
       if (selectedPass) {
         pricePaid = selectedPass.price;
+        if (pricePaid > 0) {
+          return sendError(res, 'Paid tickets require payment. Please complete payment on the event page.', 400);
+        }
       }
     }
-    
+
     // Generate ticket
     const ticketId = generateId('ticket');
     const ticketNumber = generateTicketNumber();
@@ -833,6 +838,315 @@ exports.manualCheckIn = async (req, res) => {
   } catch (error) {
     console.error('Error in manual check-in:', error);
     return sendError(res, error.message, 500);
+  }
+};
+
+// ---------- Razorpay payment ----------
+
+function getRazorpayInstance() {
+  const keyId = config.RAZORPAY_KEY_ID;
+  const keySecret = config.RAZORPAY_KEY_SECRET;
+  if (!keyId || !keySecret) {
+    throw new Error('Razorpay credentials not configured (RAZORPAY_KEY_ID, RAZORPAY_KEY_SECRET)');
+  }
+  return new Razorpay({ key_id: keyId, key_secret: keySecret });
+}
+
+/**
+ * Create Razorpay order for paid ticket. Frontend opens checkout with this order.
+ */
+exports.createOrder = async (req, res) => {
+  try {
+    const { plan_id, user_id, pass_id } = req.body;
+    if (!plan_id || !user_id) {
+      return sendError(res, 'plan_id and user_id are required', 400);
+    }
+
+    const plan = await BusinessPlan.findOne({ plan_id });
+    if (!plan) {
+      return sendError(res, 'Business plan not found', 404);
+    }
+    if (plan.type !== 'business') {
+      return sendError(res, 'This endpoint is only for business plans', 400);
+    }
+
+    const planOwnerId = plan.user_id || plan.business_id;
+    if (planOwnerId && planOwnerId === user_id) {
+      return sendError(res, 'You cannot buy a ticket for your own event', 403);
+    }
+
+    const existing = await Registration.findOne({ plan_id, user_id }).lean();
+    if (existing) {
+      return sendError(res, 'You have already registered for this event', 400);
+    }
+
+    let amount = 0;
+    if (pass_id && plan.passes && plan.passes.length > 0) {
+      const pass = plan.passes.find((p) => p.pass_id === pass_id);
+      if (!pass) {
+        return sendError(res, 'Invalid pass selected', 400);
+      }
+      amount = Number(pass.price) || 0;
+    }
+    if (amount <= 0) {
+      return sendError(res, 'Use the free registration flow for free tickets', 400);
+    }
+
+    const amountPaise = Math.round(amount * 100);
+    const receipt = `vybeme_${plan_id}_${user_id}_${Date.now()}`;
+
+    const razorpay = getRazorpayInstance();
+    const order = await razorpay.orders.create({
+      amount: amountPaise,
+      currency: 'INR',
+      receipt,
+    });
+
+    await PaymentOrder.create({
+      razorpay_order_id: order.id,
+      plan_id,
+      user_id,
+      pass_id: pass_id || null,
+      amount_paise: amountPaise,
+      status: 'created',
+    });
+
+    return sendSuccess(res, 'Order created', {
+      id: order.id,
+      amount: order.amount,
+      currency: order.currency,
+      receipt: order.receipt,
+    });
+  } catch (error) {
+    console.error('createOrder error:', error);
+    return sendError(res, error.message || 'Failed to create order', 500);
+  }
+};
+
+/**
+ * Verify Razorpay payment signature and fulfill order: create ticket + registration.
+ */
+exports.verifyPayment = async (req, res) => {
+  try {
+    const { razorpay_payment_id, razorpay_order_id, razorpay_signature } = req.body;
+    if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+      return sendError(res, 'razorpay_payment_id, razorpay_order_id and razorpay_signature are required', 400);
+    }
+
+    const keySecret = config.RAZORPAY_KEY_SECRET;
+    if (!keySecret) {
+      return sendError(res, 'Payment verification not configured', 500);
+    }
+    const expectedSignature = crypto
+      .createHmac('sha256', keySecret)
+      .update(`${razorpay_order_id}|${razorpay_payment_id}`)
+      .digest('hex');
+    if (expectedSignature !== razorpay_signature) {
+      return sendError(res, 'Invalid payment signature', 400);
+    }
+
+    const orderRecord = await PaymentOrder.findOne({ razorpay_order_id, status: 'created' });
+    if (!orderRecord) {
+      return sendError(res, 'Order not found or already fulfilled', 404);
+    }
+
+    const { plan_id, user_id, pass_id, amount_paise } = orderRecord;
+    const plan = await BusinessPlan.findOne({ plan_id });
+    if (!plan) {
+      return sendError(res, 'Event not found', 404);
+    }
+
+    if (plan.is_women_only) {
+      const registeringUser = await User.findOne({ user_id }).lean();
+      const profileGender = (registeringUser?.gender || '').toLowerCase();
+      if (profileGender !== 'female') {
+        return sendError(res, 'Only women can register for this event', 403);
+      }
+    }
+
+    const pricePaid = amount_paise / 100;
+    const ticketId = generateId('ticket');
+    const ticketNumber = generateTicketNumber();
+    const { qrData, qrHash } = generateQRCodeData(ticketId, plan_id, user_id);
+
+    const ticket = await Ticket.create({
+      ticket_id: ticketId,
+      plan_id,
+      user_id,
+      pass_id: pass_id || null,
+      qr_code: qrData,
+      qr_code_hash: qrHash,
+      ticket_number: ticketNumber,
+      status: 'active',
+      price_paid: pricePaid,
+      razorpay_order_id,
+      razorpay_payment_id,
+    });
+
+    const registration = await Registration.create({
+      registration_id: generateId('registration'),
+      plan_id,
+      user_id,
+      pass_id: pass_id || null,
+      ticket_id: ticketId,
+      status: plan.registration_required ? 'pending' : 'approved',
+      price_paid: pricePaid,
+      razorpay_order_id,
+      razorpay_payment_id,
+    });
+
+    await PaymentOrder.updateOne(
+      { razorpay_order_id },
+      { status: 'paid', razorpay_payment_id, ticket_id: ticketId, registration_id: registration.registration_id, updated_at: new Date() }
+    );
+
+    if (registration.status === 'approved') {
+      await BusinessPlan.updateOne({ plan_id }, { $inc: { approved_registrations: 1 } });
+    }
+
+    if (plan.group_id) {
+      try {
+        const group = await ChatGroup.findOne({ group_id: plan.group_id });
+        if (group && (!group.members || !group.members.includes(user_id))) {
+          if (!group.members) group.members = [];
+          group.members.push(user_id);
+          await group.save();
+          const { ChatMessage } = require('../models');
+          await ChatMessage.create({
+            message_id: generateId('msg'),
+            group_id: plan.group_id,
+            user_id,
+            type: 'text',
+            content: 'Hi',
+            reactions: [],
+          });
+        }
+      } catch (e) {
+        console.error('Failed to add user to group:', e);
+      }
+    }
+
+    const user = await User.findOne({ user_id }).lean();
+    const planDetails = {
+      plan_id: plan.plan_id,
+      title: plan.title,
+      description: plan.description,
+      location_text: plan.location_text,
+      date: plan.date,
+      time: plan.time,
+      media: plan.media,
+      ticket_image: plan.ticket_image,
+      passes: plan.passes,
+      category_main: plan.category_main,
+      category_sub: plan.category_sub,
+      group_id: plan.group_id,
+    };
+
+    return sendSuccess(res, 'Payment verified and ticket created', {
+      registration: {
+        ...registration.toObject(),
+        user: user ? { user_id: user.user_id, name: user.name, profile_image: user.profile_image } : null,
+      },
+      ticket: {
+        ticket_id: ticket.ticket_id,
+        ticket_number: ticket.ticket_number,
+        qr_code: ticket.qr_code,
+        qr_code_hash: ticket.qr_code_hash,
+        status: ticket.status,
+        price_paid: ticket.price_paid,
+        plan: planDetails,
+        user: user ? { user_id: user.user_id, name: user.name, profile_image: user.profile_image } : null,
+      },
+    }, 201);
+  } catch (error) {
+    console.error('verifyPayment error:', error);
+    return sendError(res, error.message || 'Payment verification failed', 500);
+  }
+};
+
+/**
+ * Razorpay webhook: verify signature, handle payment.captured and refund.processed.
+ * Must be called with raw body (express.raw) for signature verification.
+ */
+exports.handleRazorpayWebhook = async (req, res) => {
+  const webhookSecret = config.RAZORPAY_WEBHOOK_SECRET;
+  if (!webhookSecret) {
+    console.error('RAZORPAY_WEBHOOK_SECRET not set');
+    return res.status(500).send('Webhook not configured');
+  }
+  const signature = req.headers['x-razorpay-signature'];
+  if (!signature) {
+    return res.status(400).send('Missing signature');
+  }
+  const body = req.body;
+  const rawBody = Buffer.isBuffer(body) ? body : (typeof body === 'string' ? Buffer.from(body, 'utf8') : Buffer.from(JSON.stringify(body)));
+  const expectedSignature = crypto.createHmac('sha256', webhookSecret).update(rawBody).digest('hex');
+  if (expectedSignature !== signature) {
+    return res.status(400).send('Invalid webhook signature');
+  }
+  let event;
+  try {
+    event = typeof body === 'object' && body !== null ? body : JSON.parse(rawBody.toString('utf8'));
+  } catch (e) {
+    return res.status(400).send('Invalid JSON');
+  }
+  const eventType = event.event;
+  try {
+    if (eventType === 'payment.captured') {
+      // We already fulfill in verify-payment; nothing extra unless you want idempotency
+    } else if (eventType === 'refund.processed' || eventType === 'refund.created') {
+      const refundEntity = event.payload?.refund?.entity;
+      const paymentId = refundEntity?.payment_id || event.payload?.payment?.entity?.id;
+      if (paymentId) {
+        await Ticket.updateMany({ razorpay_payment_id: paymentId }, { status: 'cancelled', updated_at: new Date() });
+        await Registration.updateMany({ razorpay_payment_id: paymentId }, { status: 'cancelled', updated_at: new Date() });
+        await PaymentOrder.updateMany({ razorpay_payment_id: paymentId }, { status: 'refunded', updated_at: new Date() });
+      }
+    }
+  } catch (e) {
+    console.error('Webhook handler error:', e);
+    return res.status(500).send('Handler error');
+  }
+  return res.status(200).send('OK');
+};
+
+/**
+ * Refund all paid tickets for a plan (e.g. when event is cancelled). Call Razorpay refund API for each payment.
+ */
+exports.refundAllForPlan = async (req, res) => {
+  try {
+    const { plan_id } = req.params;
+    const { user_id } = req.query;
+    const plan = await BusinessPlan.findOne({ plan_id });
+    if (!plan) {
+      return sendError(res, 'Event not found', 404);
+    }
+    const ownerId = plan.user_id || plan.business_id;
+    if (user_id && ownerId !== user_id) {
+      return sendError(res, 'Only the event organizer can refund tickets', 403);
+    }
+
+    const paidRegistrations = await Registration.find({
+      plan_id,
+      status: { $in: ['pending', 'approved'] },
+      razorpay_payment_id: { $exists: true, $ne: null, $ne: '' },
+    }).lean();
+
+    const razorpay = getRazorpayInstance();
+    const results = { refunded: 0, failed: 0, errors: [] };
+    for (const reg of paidRegistrations) {
+      try {
+        await razorpay.payments.refund(reg.razorpay_payment_id, { amount: Math.round((reg.price_paid || 0) * 100) });
+        results.refunded += 1;
+      } catch (e) {
+        results.failed += 1;
+        results.errors.push({ registration_id: reg.registration_id, message: e.message || String(e) });
+      }
+    }
+    return sendSuccess(res, 'Refund initiated for paid tickets', results);
+  } catch (error) {
+    console.error('refundAllForPlan error:', error);
+    return sendError(res, error.message || 'Refund failed', 500);
   }
 };
 

@@ -72,6 +72,11 @@ const corsOptions = {
 
 // Middleware
 app.use(cors(corsOptions));
+// Razorpay webhook: must use raw body for signature verification (before express.json())
+app.post('/api/webhooks/razorpay', express.raw({ type: 'application/json' }), (req, res) => {
+  const ticketController = require('./controllers/ticketController');
+  ticketController.handleRazorpayWebhook(req, res);
+});
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 

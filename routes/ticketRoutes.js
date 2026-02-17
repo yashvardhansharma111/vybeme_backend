@@ -3,7 +3,14 @@ const router = express.Router();
 const ticketController = require('../controllers/ticketController');
 const { authenticate } = require('../middleware/auth');
 
-// Register for event and generate ticket
+// Razorpay: create order (authenticated)
+router.post('/create-order', authenticate, ticketController.createOrder);
+// Razorpay: verify payment and create ticket + registration
+router.post('/verify-payment', authenticate, ticketController.verifyPayment);
+// Refund all paid tickets for a plan (organizer only)
+router.post('/refund-plan/:plan_id', authenticate, ticketController.refundAllForPlan);
+
+// Register for event and generate ticket (free passes only; paid use create-order → verify-payment)
 router.post('/register', authenticate, ticketController.registerForEvent);
 
 // Get ticket by ticket_id (must come before /:plan_id/:user_id to avoid route conflicts)

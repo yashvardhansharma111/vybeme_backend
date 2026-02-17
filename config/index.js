@@ -16,5 +16,9 @@ module.exports = {
   R2_BUCKET_NAME: process.env.R2_BUCKET_NAME,
   R2_ENDPOINT: process.env.R2_ENDPOINT,
   R2_PUBLIC_URL: process.env.R2_PUBLIC_URL,
+  // Razorpay
+  RAZORPAY_KEY_ID: process.env.RAZORPAY_KEY_ID,
+  RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET,
+  RAZORPAY_WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET,
 };
 

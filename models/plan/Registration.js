@@ -78,7 +78,9 @@ const registrationSchema = new mongoose.Schema({
   updated_at: {
     type: Date,
     default: Date.now
-  }
+  },
+  razorpay_order_id: { type: String, default: null },
+  razorpay_payment_id: { type: String, default: null }
 });
 
 registrationSchema.index({ plan_id: 1, user_id: 1 }, { unique: true }); // One registration per user per plan
