@@ -12,7 +12,12 @@ const notificationSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['comment', 'reaction', 'join', 'repost', 'message'],
+    enum: [
+      'comment', 'reaction', 'join', 'repost', 'message',
+      'post_live', 'event_ended', 'event_ended_registered', 'event_ended_attended',
+      'free_event_cancelled', 'paid_event_cancelled',
+      'registration_successful', 'plan_shared_chat'
+    ],
     required: true
   },
   source_plan_id: {

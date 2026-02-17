@@ -213,6 +213,21 @@ exports.registerForEvent = async (req, res) => {
     // Get user details for response
     const user = await User.findOne({ user_id }).lean();
 
+    // Notify registrant (regular user): Registration Successful
+    const { createGeneralNotification } = require('./notificationController');
+    if (plan.title) {
+      await createGeneralNotification(user_id, 'registration_successful', {
+        source_plan_id: plan_id,
+        source_user_id: 'system',
+        payload: {
+          event_title: plan.title,
+          cta_type: 'go_to_ticket',
+          notification_text: `Booking Successful for ${plan.title}`,
+          ticket_id: ticketId
+        }
+      });
+    }
+
     // Notify plan/business owner when someone registers (unless they're notifying themselves)
     const ownerId = plan.user_id || plan.business_id;
     if (ownerId && ownerId !== user_id) {

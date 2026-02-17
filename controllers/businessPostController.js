@@ -1,9 +1,10 @@
-const { BusinessPlan, ChatGroup, ChatMessage, BasePlan } = require('../models');
+const { BusinessPlan, ChatGroup, ChatMessage, BasePlan, Registration } = require('../models');
 const CategoryTag = require('../models/other/CategoryTag');
 const { sendSuccess, sendError, generateId } = require('../utils');
 const { uploadImage, uploadVideo } = require('../config/cloudinary');
 const { cleanupFile } = require('../middleware/upload');
 const { refundPaidTicketsForPlan } = require('./ticketController');
+const { createGeneralNotification } = require('./notificationController');
 
 // req.files from multer.fields() is an object { files: [...], ticket_image: [...] }, not an array
 function getAllFiles(files) {
@@ -223,6 +224,19 @@ exports.createBusinessPost = async (req, res) => {
       // Continue even if group creation fails - don't block post creation
     }
     
+    // Notify business user: Post Live
+    if (plan.user_id && plan.title) {
+      await createGeneralNotification(plan.user_id, 'post_live', {
+        source_plan_id: plan.plan_id,
+        source_user_id: 'system',
+        payload: {
+          event_title: plan.title,
+          cta_type: 'go_to_event',
+          notification_text: `${plan.title} is live`
+        }
+      });
+    }
+
     // Get the final plan with group_id to ensure we return the correct data
     const finalPlan = await BusinessPlan.findOne({ plan_id: plan.plan_id }).lean();
     
@@ -351,6 +365,35 @@ exports.updateBusinessPost = async (req, res) => {
           }
         })
         .catch((err) => console.error('[businessPost] Auto-refund on cancel failed:', err.message));
+    }
+
+    // Event cancelled: notify owner (business user) and all registrants (regular users)
+    if (wasDeleted && plan.plan_id && plan.title) {
+      const notifType = refundPaidTickets ? 'paid_event_cancelled' : 'free_event_cancelled';
+      const notifTextOwner = refundPaidTickets
+        ? `${plan.title} is cancelled. Refunds are processed`
+        : `${plan.title} is cancelled.`;
+      const notifTextUser = refundPaidTickets
+        ? `${plan.title} is cancelled. Your refund is processed`
+        : `${plan.title} is cancelled.`;
+
+      if (plan.user_id) {
+        await createGeneralNotification(plan.user_id, notifType, {
+          source_plan_id: plan.plan_id,
+          source_user_id: 'system',
+          payload: { event_title: plan.title, cta_type: 'go_to_event', notification_text: notifTextOwner }
+        });
+      }
+      const registrations = await Registration.find({ plan_id: plan.plan_id, status: { $in: ['pending', 'approved'] } }).select('user_id').lean();
+      for (const reg of registrations) {
+        if (reg.user_id && reg.user_id !== plan.user_id) {
+          await createGeneralNotification(reg.user_id, notifType, {
+            source_plan_id: plan.plan_id,
+            source_user_id: 'system',
+            payload: { event_title: plan.title, cta_type: 'go_to_event', notification_text: notifTextUser }
+          });
+        }
+      }
     }
 
     return sendSuccess(res, 'Business post updated successfully', plan);

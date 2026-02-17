@@ -46,20 +46,23 @@ exports.getNotifications = async (req, res) => {
       
       // Fetch user details and interaction status for each interaction
       for (const interaction of group.interactions) {
-        const user = await User.findOne({ user_id: interaction.source_user_id });
-        if (user) {
-          interaction.user = {
-            user_id: user.user_id,
-            name: user.name || `User ${user.user_id.slice(-4)}`, // Fallback to user_id if name is missing
-            profile_image: user.profile_image || null
-          };
+        if (interaction.source_user_id === 'system') {
+          interaction.user = { user_id: 'system', name: '', profile_image: null };
         } else {
-          // If user not found, still provide basic info
-          interaction.user = {
-            user_id: interaction.source_user_id,
-            name: `User ${interaction.source_user_id.slice(-4)}`,
-            profile_image: null
-          };
+          const user = await User.findOne({ user_id: interaction.source_user_id });
+          if (user) {
+            interaction.user = {
+              user_id: user.user_id,
+              name: user.name || `User ${user.user_id.slice(-4)}`,
+              profile_image: user.profile_image || null
+            };
+          } else {
+            interaction.user = {
+              user_id: interaction.source_user_id,
+              name: `User ${interaction.source_user_id.slice(-4)}`,
+              profile_image: null
+            };
+          }
         }
         
         // Get interaction status from PlanInteraction
@@ -104,6 +107,29 @@ exports.markAsRead = async (req, res) => {
     return sendSuccess(res, 'Notification marked as read');
   } catch (error) {
     return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Create a general (system or user) notification. Used by other controllers.
+ * @param {string} user_id - Recipient user id
+ * @param {string} type - Notification type (e.g. post_live, event_ended, registration_successful)
+ * @param {object} opts - { source_plan_id?, source_user_id (default 'system'), payload }
+ */
+exports.createGeneralNotification = async (user_id, type, opts = {}) => {
+  const { source_plan_id = null, source_user_id = 'system', payload = {} } = opts;
+  try {
+    await Notification.create({
+      notification_id: generateId('notification'),
+      user_id,
+      type,
+      source_plan_id,
+      source_user_id,
+      payload,
+      is_read: false
+    });
+  } catch (err) {
+    console.error('[createGeneralNotification]', err.message);
   }
 };
 

@@ -4,7 +4,8 @@
  * Runs on an interval so that when the start time is reached, the plan is auto-deactivated.
  */
 
-const { BusinessPlan } = require('../models');
+const { BusinessPlan, Registration } = require('../models');
+const { createGeneralNotification } = require('../controllers/notificationController');
 
 const INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
@@ -48,11 +49,79 @@ async function deactivatePastEventPlans() {
       const eventStart = getEventStartDate(plan.date, plan.time);
       if (!eventStart) continue;
       if (eventStart.getTime() <= now.getTime()) {
+        const plan_id = plan.plan_id;
+        const ownerId = plan.user_id;
+        const eventTitle = plan.title || 'Event';
+
+        const registeredCount = await Registration.countDocuments({
+          plan_id,
+          status: { $in: ['pending', 'approved'] }
+        });
+        const attendedCount = await Registration.countDocuments({
+          plan_id,
+          checked_in: true
+        });
+
         await BusinessPlan.updateOne(
-          { plan_id: plan.plan_id },
+          { plan_id },
           { $set: { post_status: 'deleted', deleted_at: new Date() } }
         );
         deactivated++;
+
+        if (ownerId) {
+          await createGeneralNotification(ownerId, 'event_ended', {
+            source_plan_id: plan_id,
+            source_user_id: 'system',
+            payload: {
+              event_title: eventTitle,
+              cta_type: 'go_to_event',
+              notification_text: `${eventTitle} has ended`
+            }
+          });
+          await createGeneralNotification(ownerId, 'event_ended_registered', {
+            source_plan_id: plan_id,
+            source_user_id: 'system',
+            payload: {
+              event_title: eventTitle,
+              cta_type: 'go_to_analytics',
+              registered_count: registeredCount,
+              notification_text: `${registeredCount} people registered for ${eventTitle}`
+            }
+          });
+          await createGeneralNotification(ownerId, 'event_ended_attended', {
+            source_plan_id: plan_id,
+            source_user_id: 'system',
+            payload: {
+              event_title: eventTitle,
+              cta_type: 'go_to_analytics',
+              scanned_count: attendedCount,
+              notification_text: `${attendedCount} people attended ${eventTitle}`
+            }
+          });
+        }
+
+        // Notify registrants (regular users): Event ended -> Go to Chat
+        const registrations = await Registration.find({
+          plan_id,
+          status: { $in: ['pending', 'approved'] }
+        })
+          .select('user_id')
+          .lean();
+        const groupId = plan.group_id || null;
+        for (const reg of registrations) {
+          if (reg.user_id && reg.user_id !== ownerId) {
+            await createGeneralNotification(reg.user_id, 'event_ended', {
+              source_plan_id: plan_id,
+              source_user_id: 'system',
+              payload: {
+                event_title: eventTitle,
+                cta_type: 'go_to_chat',
+                notification_text: `${eventTitle} has ended`,
+                group_id: groupId
+              }
+            });
+          }
+        }
       }
     }
     if (deactivated > 0) {

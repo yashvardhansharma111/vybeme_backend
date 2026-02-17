@@ -399,6 +399,29 @@ exports.sendMessage = async (req, res) => {
       );
     }
 
+    // Plan shared in chat: notify other members
+    if (type === 'plan' && contentToStore?.plan_id) {
+      const plan = await BasePlan.findOne({ plan_id: contentToStore.plan_id }).lean();
+      const planTitle = plan?.title || 'A plan';
+      const { createGeneralNotification } = require('./notificationController');
+      const { User } = require('../models');
+      const sender = await User.findOne({ user_id }).lean();
+      const senderName = sender?.name || 'Someone';
+      const others = (group.members || []).filter((m) => String(m) !== String(user_id));
+      for (const memberId of others) {
+        await createGeneralNotification(memberId, 'plan_shared_chat', {
+          source_plan_id: contentToStore.plan_id,
+          source_user_id: user_id,
+          payload: {
+            event_title: planTitle,
+            cta_type: 'go_to_plan',
+            notification_text: `${senderName} shared a plan with you`,
+            plan_id: contentToStore.plan_id
+          }
+        });
+      }
+    }
+
     return sendSuccess(res, 'Message sent successfully', { message_id: message.message_id }, 201);
   } catch (error) {
     return sendError(res, error.message, 500);
