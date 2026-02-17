@@ -1,5 +1,4 @@
 const crypto = require('crypto');
-const Razorpay = require('razorpay');
 const config = require('../config');
 const { Ticket, Registration, BusinessPlan, User, ChatGroup, Notification, PaymentOrder } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
@@ -844,6 +843,12 @@ exports.manualCheckIn = async (req, res) => {
 // ---------- Razorpay payment ----------
 
 function getRazorpayInstance() {
+  let Razorpay;
+  try {
+    Razorpay = require('razorpay');
+  } catch (e) {
+    throw new Error('Razorpay SDK not installed. Run: npm install razorpay');
+  }
   const keyId = config.RAZORPAY_KEY_ID;
   const keySecret = config.RAZORPAY_KEY_SECRET;
   if (!keyId || !keySecret) {
