@@ -18,9 +18,14 @@ exports.getHomeFeed = async (req, res) => {
       deleted_at: null
     };
     
+    // Category filter: only show posts whose MAIN category matches the selected tag (prefix, case-insensitive).
+    // e.g. "fitness" matches "fitness" and "fitness/training"; "running" matches only "running". No category_sub
+    // matching so a Running post with a Fitness sub-tag does not appear under Fitness.
     if (category_main && typeof category_main === 'string' && category_main.trim()) {
       const main = category_main.trim();
-      query.category_main = new RegExp(`^${main.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
+      const escaped = main.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const mainRegex = new RegExp(`^${escaped}`, 'i');
+      query.category_main = mainRegex;
     }
     
     if (category_sub.length > 0) {

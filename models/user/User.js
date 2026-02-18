@@ -42,6 +42,7 @@ const userSchema = new mongoose.Schema({
     x: { type: String, default: null },
     facebook: { type: String, default: null },
     snapchat: { type: String, default: null },
+    google_drive: { type: String, default: null },
   },
   is_business: {
     type: Boolean,

@@ -120,6 +120,7 @@ exports.updateProfile = async (req, res) => {
         ...(sm.x !== undefined && { x: sm.x }),
         ...(sm.facebook !== undefined && { facebook: sm.facebook }),
         ...(sm.snapchat !== undefined && { snapchat: sm.snapchat }),
+        ...(sm.google_drive !== undefined && { google_drive: sm.google_drive }),
       };
     }
     
@@ -264,7 +265,8 @@ exports.getSavedPosts = async (req, res) => {
       saved_at: savedAtMap[plan.plan_id],
       location: plan.location_coordinates || plan.location_text,
       is_active: plan.is_live,
-      interaction_count: plan.interaction_count
+      interaction_count: plan.interaction_count,
+      type: plan.type || 'regular'
     }));
     
     return sendSuccess(res, 'Saved posts retrieved successfully', formattedPosts);
