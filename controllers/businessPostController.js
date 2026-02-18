@@ -271,6 +271,10 @@ exports.updateBusinessPost = async (req, res) => {
       try { updateData.add_details = JSON.parse(updateData.add_details); } catch (_) { updateData.add_details = []; }
     }
     if (updateData.add_details !== undefined && !Array.isArray(updateData.add_details)) updateData.add_details = [];
+    if (typeof updateData.media === 'string') {
+      try { updateData.media = JSON.parse(updateData.media); } catch (_) { updateData.media = []; }
+    }
+    if (updateData.media !== undefined && !Array.isArray(updateData.media)) updateData.media = [];
 
     const plan = await BusinessPlan.findOne({ plan_id: post_id });
     if (!plan) {

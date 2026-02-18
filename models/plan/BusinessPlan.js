@@ -21,6 +21,11 @@ const addDetailSchema = new mongoose.Schema({
   }
 }, { _id: false });
 
+const passMediaSchema = new mongoose.Schema({
+  url: { type: String, required: true },
+  type: { type: String, enum: ['image', 'video'], default: 'image' }
+}, { _id: false });
+
 const passSchema = new mongoose.Schema({
   pass_id: {
     type: String,
@@ -41,6 +46,10 @@ const passSchema = new mongoose.Schema({
   capacity: {
     type: Number,
     default: null // Number of people this pass is for (e.g., 1, 2, 4)
+  },
+  media: {
+    type: [passMediaSchema],
+    default: [] // Optional image per pass (ticket image); fallback to plan.media[0] or plan.ticket_image
   }
 }, { _id: false });
 
