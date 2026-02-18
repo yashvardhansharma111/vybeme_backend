@@ -71,6 +71,12 @@ exports.registerForEvent = async (req, res) => {
       return sendError(res, 'You have already registered for this event', 400);
     }
 
+    // Max 2 users per event (first come, first served)
+    const registrationCount = await Registration.countDocuments({ plan_id });
+    if (registrationCount >= 2) {
+      return sendError(res, "Event is full. Better luck next time.", 400);
+    }
+
     // Get pass details if pass_id provided
     let pricePaid = 0;
     let selectedPass = null;
@@ -900,6 +906,12 @@ exports.createOrder = async (req, res) => {
       return sendError(res, 'You have already registered for this event', 400);
     }
 
+    // Max 2 users per event (first come, first served)
+    const registrationCount = await Registration.countDocuments({ plan_id });
+    if (registrationCount >= 2) {
+      return sendError(res, "Event is full. Better luck next time.", 400);
+    }
+
     let amount = 0;
     if (pass_id && plan.passes && plan.passes.length > 0) {
       const pass = plan.passes.find((p) => p.pass_id === pass_id);
@@ -983,6 +995,12 @@ exports.verifyPayment = async (req, res) => {
       if (profileGender !== 'female') {
         return sendError(res, 'Only women can register for this event', 403);
       }
+    }
+
+    // Max 2 users per event (re-check in case of race between order and verify)
+    const registrationCount = await Registration.countDocuments({ plan_id });
+    if (registrationCount >= 2) {
+      return sendError(res, "Event is full. Better luck next time.", 400);
     }
 
     const pricePaid = amount_paise / 100;
