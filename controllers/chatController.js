@@ -523,6 +523,17 @@ exports.getMessages = async (req, res) => {
       typing_users = typingUsers.map((u) => ({ user_id: u.user_id, name: u.name || 'Someone' }));
     }
 
+    const currentUserId = req.user?.user_id || req.user?.id;
+    if (currentUserId && group_id) {
+      const groupDoc = await ChatGroup.findOne({ group_id });
+      if (groupDoc) {
+        if (!groupDoc.last_read_at) groupDoc.last_read_at = new Map();
+        groupDoc.last_read_at.set(String(currentUserId), new Date());
+        groupDoc.markModified('last_read_at');
+        await groupDoc.save();
+      }
+    }
+
     return sendSuccess(res, 'Messages retrieved successfully', {
       messages: enrichedMessages,
       typing_users
@@ -825,6 +836,14 @@ exports.getChatLists = async (req, res) => {
         }
       }
       
+      const lastReadAt = group.last_read_at && (group.last_read_at[String(user_id)] || group.last_read_at[user_id]);
+      const lastReadDate = lastReadAt ? new Date(lastReadAt) : new Date(0);
+      const unreadCount = await ChatMessage.countDocuments({
+        group_id: group.group_id,
+        timestamp: { $gt: lastReadDate },
+        user_id: { $ne: user_id }
+      });
+
       const chatItem = {
         group_id: group.group_id,
         plan_id: plan.plan_id,
@@ -848,7 +867,7 @@ exports.getChatLists = async (req, res) => {
         member_count: group.members.length,
         is_group: group.members.length > 2,
         group_name: group.group_name || (group.members.length === 2 && otherUser ? otherUser.name : plan.title),
-        unread_count: 0 // TODO: implement per-group read tracking for real unread counts
+        unread_count: unreadCount
       };
       
       // Check if this is a business plan - business plan groups should always be in "groups" section
@@ -922,9 +941,22 @@ exports.getUnreadCounter = async (req, res) => {
     if (!user_id) {
       return sendError(res, 'user_id is required', 400);
     }
-    // TODO: implement read tracking (e.g. last_read per user per group) and sum unread per group
-    const unread_count = 0;
-    return sendSuccess(res, 'Unread count retrieved', { unread_count });
+    const userGroups = await ChatGroup.find({
+      $expr: { $in: [String(user_id), { $map: { input: '$members', as: 'm', in: { $toString: '$$m' } } }] },
+      is_closed: false
+    }).lean();
+    let unread_chats_count = 0;
+    for (const group of userGroups) {
+      const lastReadAt = group.last_read_at && (group.last_read_at[String(user_id)] || group.last_read_at[user_id]);
+      const lastReadDate = lastReadAt ? new Date(lastReadAt) : new Date(0);
+      const count = await ChatMessage.countDocuments({
+        group_id: group.group_id,
+        timestamp: { $gt: lastReadDate },
+        user_id: { $ne: user_id }
+      });
+      if (count > 0) unread_chats_count += 1;
+    }
+    return sendSuccess(res, 'Unread count retrieved', { unread_count: unread_chats_count });
   } catch (error) {
     return sendError(res, error.message, 500);
   }

@@ -146,17 +146,8 @@ exports.registerForEvent = async (req, res) => {
             }
             group.members.push(user_id);
             const savedGroup = await group.save();
-            
-            const { ChatMessage } = require('../models');
-            await ChatMessage.create({
-              message_id: generateId('msg'),
-              group_id: plan.group_id,
-              user_id,
-              type: 'text',
-              content: 'Hi',
-              reactions: [],
-            });
-            
+            // No automated "Hi" message when user joins event chat
+
             const verifyGroup = await ChatGroup.findOne({ group_id: plan.group_id }).lean();
             console.log(`✅ Added user ${user_id} to group ${plan.group_id} for business plan ${plan_id}`);
             console.log(`   - Group now has ${savedGroup.members.length} members: [${savedGroup.members.join(', ')}]`);

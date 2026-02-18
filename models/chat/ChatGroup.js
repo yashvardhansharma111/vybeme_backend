@@ -45,6 +45,12 @@ const chatGroupSchema = new mongoose.Schema({
   created_at: {
     type: Date,
     default: Date.now
+  },
+  /** Per-user last read timestamp (user_id -> Date) for unread count */
+  last_read_at: {
+    type: Map,
+    of: Date,
+    default: () => new Map()
   }
 });
 
