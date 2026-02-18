@@ -18,8 +18,9 @@ exports.getHomeFeed = async (req, res) => {
       deleted_at: null
     };
     
-    if (category_main) {
-      query.category_main = category_main;
+    if (category_main && typeof category_main === 'string' && category_main.trim()) {
+      const main = category_main.trim();
+      query.category_main = new RegExp(`^${main.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i');
     }
     
     if (category_sub.length > 0) {
