@@ -136,7 +136,7 @@ exports.getOverallAnalytics = async (req, res) => {
       $or: [{ user_id: caller_id }, { business_id: caller_id }],
       created_at: { $gte: since },
     })
-      .select('plan_id title created_at')
+      .select('plan_id title created_at media')
       .lean();
 
     const plan_ids = plans.map((p) => p.plan_id);

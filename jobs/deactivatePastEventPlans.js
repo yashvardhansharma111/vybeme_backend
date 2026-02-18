@@ -69,6 +69,15 @@ async function deactivatePastEventPlans() {
         deactivated++;
 
         if (ownerId) {
+          const regCount = await Registration.countDocuments({
+            plan_id,
+            status: { $in: ['pending', 'approved'] }
+          });
+          const attCount = await Registration.countDocuments({
+            plan_id,
+            checked_in: true
+          });
+
           await createGeneralNotification(ownerId, 'event_ended', {
             source_plan_id: plan_id,
             source_user_id: 'system',
@@ -84,8 +93,8 @@ async function deactivatePastEventPlans() {
             payload: {
               event_title: eventTitle,
               cta_type: 'go_to_analytics',
-              registered_count: registeredCount,
-              notification_text: `${registeredCount} people registered for ${eventTitle}`
+              registered_count: regCount,
+              notification_text: `${regCount} people registered for ${eventTitle}`
             }
           });
           await createGeneralNotification(ownerId, 'event_ended_attended', {
@@ -94,11 +103,11 @@ async function deactivatePastEventPlans() {
             payload: {
               event_title: eventTitle,
               cta_type: 'go_to_analytics',
-              scanned_count: attendedCount,
-              registered_count: registeredCount,
-              notification_text: attendedCount > 0
-                ? `${attendedCount} people attended ${eventTitle}`
-                : `${registeredCount} people registered for ${eventTitle}`
+              scanned_count: attCount,
+              registered_count: regCount,
+              notification_text: attCount > 0
+                ? `${attCount} people attended ${eventTitle}`
+                : `${regCount} people registered for ${eventTitle}`
             }
           });
         }
