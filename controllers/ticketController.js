@@ -908,7 +908,7 @@ exports.createOrder = async (req, res) => {
 
     // Max 2 users per event (first come, first served)
     const registrationCount = await Registration.countDocuments({ plan_id });
-    if (registrationCount >= 2) {
+    if (registrationCount >= 20) {
       return sendError(res, "Event is full. Better luck next time.", 400);
     }
 
@@ -999,7 +999,7 @@ exports.verifyPayment = async (req, res) => {
 
     // Max 2 users per event (re-check in case of race between order and verify)
     const registrationCount = await Registration.countDocuments({ plan_id });
-    if (registrationCount >= 2) {
+    if (registrationCount >= 20) {
       return sendError(res, "Event is full. Better luck next time.", 400);
     }
 
