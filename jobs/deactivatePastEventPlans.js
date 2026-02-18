@@ -95,7 +95,10 @@ async function deactivatePastEventPlans() {
               event_title: eventTitle,
               cta_type: 'go_to_analytics',
               scanned_count: attendedCount,
-              notification_text: `${attendedCount} people attended ${eventTitle}`
+              registered_count: registeredCount,
+              notification_text: attendedCount > 0
+                ? `${attendedCount} people attended ${eventTitle}`
+                : `${registeredCount} people registered for ${eventTitle}`
             }
           });
         }
