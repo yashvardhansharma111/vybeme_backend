@@ -68,15 +68,12 @@ async function deactivatePastEventPlans() {
         );
         deactivated++;
 
+        // Use counts fetched before update (registrations are not deleted)
+        const regCount = Number(registeredCount);
+        const attCount = Number(attendedCount);
+
         if (ownerId) {
-          const regCount = await Registration.countDocuments({
-            plan_id,
-            status: { $in: ['pending', 'approved'] }
-          });
-          const attCount = await Registration.countDocuments({
-            plan_id,
-            checked_in: true
-          });
+          console.log('[deactivatePastEventPlans] plan_id=', plan_id, 'regCount=', regCount, 'attCount=', attCount);
 
           await createGeneralNotification(ownerId, 'event_ended', {
             source_plan_id: plan_id,
