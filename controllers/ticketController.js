@@ -71,11 +71,13 @@ exports.registerForEvent = async (req, res) => {
       return sendError(res, 'You have already registered for this event', 400);
     }
 
-    // Max 20 users per event (first come, first served)
+    // Get registration count (needed for checkin code generation)
     let registrationCount = await Registration.countDocuments({ plan_id });
-    if (registrationCount >= 20) {
-      return sendError(res, "Event is full. Better luck next time.", 400);
-    }
+    
+    // Max 20 users per event (first come, first served) - COMMENTED OUT: removed limit
+    // if (registrationCount >= 20) {
+    //   return sendError(res, "Event is full. Better luck next time.", 400);
+    // }
 
     // Determine if this is a free event without ticket types (no passes configured)
     const hasPasses = Array.isArray(plan.passes) && plan.passes.length > 0;
@@ -923,11 +925,11 @@ exports.createOrder = async (req, res) => {
       return sendError(res, 'You have already registered for this event', 400);
     }
 
-    // Max 20 users per event (first come, first served)
-    const registrationCount = await Registration.countDocuments({ plan_id });
-    if (registrationCount >= 20) {
-      return sendError(res, "Event is full. Better luck next time.", 400);
-    }
+    // Max 20 users per event (first come, first served) - COMMENTED OUT: removed limit
+    // const registrationCount = await Registration.countDocuments({ plan_id });
+    // if (registrationCount >= 20) {
+    //   return sendError(res, "Event is full. Better luck next time.", 400);
+    // }
 
     let amount = 0;
     if (pass_id && plan.passes && plan.passes.length > 0) {
@@ -1014,11 +1016,11 @@ exports.verifyPayment = async (req, res) => {
       }
     }
 
-    // Max 20 users per event (re-check in case of race between order and verify)
-    const registrationCount = await Registration.countDocuments({ plan_id });
-    if (registrationCount >= 20) {
-      return sendError(res, "Event is full. Better luck next time.", 400);
-    }
+    // Max 20 users per event (re-check in case of race between order and verify) - COMMENTED OUT: removed limit
+    // const registrationCount = await Registration.countDocuments({ plan_id });
+    // if (registrationCount >= 20) {
+    //   return sendError(res, "Event is full. Better luck next time.", 400);
+    // }
 
     const pricePaid = amount_paise / 100;
     const ticketId = generateId('ticket');
