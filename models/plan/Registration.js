@@ -25,6 +25,11 @@ const registrationSchema = new mongoose.Schema({
     default: null, // Reference to Ticket if ticket was generated
     index: true
   },
+  // For free events without tickets: human–readable check‑in / confirmation code
+  checkin_code: {
+    type: String,
+    default: null
+  },
   status: {
     type: String,
     enum: ['pending', 'approved', 'rejected', 'cancelled'],

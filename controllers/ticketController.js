@@ -72,9 +72,34 @@ exports.registerForEvent = async (req, res) => {
     }
 
     // Max 20 users per event (first come, first served)
-    const registrationCount = await Registration.countDocuments({ plan_id });
+    let registrationCount = await Registration.countDocuments({ plan_id });
     if (registrationCount >= 20) {
       return sendError(res, "Event is full. Better luck next time.", 400);
+    }
+
+    // Determine if this is a free event without ticket types (no passes configured)
+    const hasPasses = Array.isArray(plan.passes) && plan.passes.length > 0;
+    const isFreeNoPassesEvent = !hasPasses;
+
+    // For free events without passes, generate a human–readable check‑in / confirmation code
+    let checkinCode = null;
+    if (isFreeNoPassesEvent) {
+      try {
+        const ownerId = plan.user_id || plan.business_id;
+        let organizerFirstName = 'Guest';
+        if (ownerId) {
+          const owner = await User.findOne({ user_id: ownerId }).lean();
+          if (owner && owner.name) {
+            organizerFirstName = owner.name.trim().split(/\s+/)[0] || organizerFirstName;
+          }
+        }
+        const prefix = organizerFirstName.toUpperCase();
+        const rankNumber = registrationCount + 1; // next registrant
+        const rankSuffix = String(rankNumber).padStart(2, '0');
+        checkinCode = `${prefix}${rankSuffix}`;
+      } catch (codeError) {
+        console.error('Failed to generate checkin code for free event:', codeError);
+      }
     }
 
     // Get pass details if pass_id provided
@@ -115,6 +140,7 @@ exports.registerForEvent = async (req, res) => {
       user_id,
       pass_id: pass_id || null,
       ticket_id: ticketId,
+      checkin_code: checkinCode,
       status: plan.registration_required ? 'pending' : 'approved',
       price_paid: pricePaid,
       message: message || null,
