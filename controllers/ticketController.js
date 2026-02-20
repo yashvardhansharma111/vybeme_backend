@@ -65,9 +65,27 @@ exports.registerForEvent = async (req, res) => {
       return sendError(res, 'You cannot register for your own event', 403);
     }
 
-    // One registration per user per plan
+    // One registration per user per plan. If a registration already exists but
+    // the caller has provided survey fields we treat this as an update rather
+    // than an error. This lets the front‑end show a post‑registration form for
+    // paid events and attach the answers after the payment flow completes.
     const existing = await Registration.findOne({ plan_id, user_id }).lean();
     if (existing) {
+      const hasSurvey = age_range || gender || running_experience || what_brings_you;
+      if (hasSurvey) {
+        await Registration.updateOne(
+          { plan_id, user_id },
+          {
+            age_range: age_range || existing.age_range || null,
+            gender: gender || existing.gender || null,
+            running_experience: running_experience || existing.running_experience || null,
+            what_brings_you: what_brings_you || existing.what_brings_you || null,
+          }
+        );
+        // return the existing ticket/registration so client can proceed
+        const ticket = await Ticket.findOne({ plan_id, user_id }).lean();
+        return sendSuccess(res, 'Registration updated', { registration: existing, ticket: ticket || null });
+      }
       return sendError(res, 'You have already registered for this event', 400);
     }
 
