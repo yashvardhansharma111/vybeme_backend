@@ -808,7 +808,7 @@ exports.getAttendeeList = async (req, res) => {
           price_paid: reg.price_paid,
           created_at: reg.created_at,
           age_range: reg.age_range || null,
-          gender: reg.gender || null,
+          gender: reg.gender || user?.gender || null,
           running_experience: reg.running_experience || null,
           what_brings_you: reg.what_brings_you || null
         };
