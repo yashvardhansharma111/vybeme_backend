@@ -535,6 +535,7 @@ exports.getYashvardhanAttendees = async (req, res) => {
           user: user ? { user_id: user.user_id, name: user.name, profile_image: user.profile_image, phone_number: user.phone_number || null } : null,
           ticket_id: reg.ticket_id,
           ticket_number: ticket?.ticket_number || null,
+          checkin_code: reg.checkin_code || null,
           status: reg.status,
           checked_in: reg.checked_in || ticket?.checked_in || false,
           price_paid: reg.price_paid,
