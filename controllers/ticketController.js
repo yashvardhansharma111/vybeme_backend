@@ -800,6 +800,7 @@ exports.getAttendeeList = async (req, res) => {
           } : null,
           ticket_id: reg.ticket_id,
           ticket_number: ticket?.ticket_number || null,
+          checkin_code: reg.checkin_code || null,
           status: reg.status,
           checked_in: reg.checked_in || ticket?.checked_in || false,
           checked_in_at: reg.checked_in_at || ticket?.checked_in_at || null,
