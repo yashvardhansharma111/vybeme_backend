@@ -4,6 +4,8 @@ const MapCluster = require('./MapCluster');
 const ContactSync = require('./ContactSync');
 const Notification = require('./Notification');
 const UserReport = require('./UserReport');
+const Form = require('./Form');
+const FormResponse = require('./FormResponse');
 
 module.exports = {
   CategoryTag,
@@ -11,6 +13,8 @@ module.exports = {
   MapCluster,
   ContactSync,
   Notification,
-  UserReport
+  UserReport,
+  Form,
+  FormResponse
 };
 

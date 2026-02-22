@@ -138,6 +138,10 @@ const businessPlanSchema = new mongoose.Schema({
   ticket_image: {
     type: String,
     default: null // Separate image for ticket display (different from post media)
+  },
+  form_id: {
+    type: String,
+    default: null // Reference to custom form for registration
   }
 });
 
