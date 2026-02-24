@@ -323,6 +323,17 @@ exports.updateBusinessPost = async (req, res) => {
       }
     }
 
+    // If organiser updated event media but didn't explicitly set ticket_image,
+    // keep tickets in sync by using the latest image from the updated media.
+    if (req.body.ticket_image === undefined && !ticketImageFile && Array.isArray(updateData.media) && updateData.media.length > 0) {
+      const lastImage = [...updateData.media]
+        .reverse()
+        .find((m) => m && typeof m === 'object' && (m.url || m.url === '') && (String(m.type || 'image').toLowerCase() === 'image'));
+      if (lastImage?.url) {
+        updateData.ticket_image = lastImage.url;
+      }
+    }
+
     // Category logic (main + sub) – sync with CategoryTag like normal plans
     if (updateData.category_main) {
       const mainCategory = String(updateData.category_main).toLowerCase().trim();
