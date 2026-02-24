@@ -562,49 +562,52 @@ exports.getYashvardhanAttendees = async (req, res) => {
 exports.getYashvardhanTicket = async (req, res) => {
   try {
     const { plan_id, user_id } = req.params;
+
     const registration = await Registration.findOne({ plan_id, user_id });
-    if (!registration || !registration.ticket_id) return sendError(res, 'Ticket not found', 404);
+    if (!registration || !registration.ticket_id)
+      return sendError(res, 'Ticket not found', 404);
+
     const ticket = await Ticket.findOne({ ticket_id: registration.ticket_id });
     if (!ticket) return sendError(res, 'Ticket not found', 404);
+
     const plan = await BusinessPlan.findOne({ plan_id }).lean();
     const user = await User.findOne({ user_id }).lean();
-    
-    // Filter out location from add_details for Yashvardhan (don't show location tag on download)
-    const filteredAddDetails = plan && Array.isArray(plan.add_details)
-      ? plan.add_details.filter(d => {
-          const detailType = (d.detail_type || '').toLowerCase();
-          return !detailType.includes('location') && !detailType.includes('venue') && !detailType.includes('address');
-        })
-      : [];
-    
+
     return sendSuccess(res, 'Ticket retrieved', {
       ticket: {
         ...ticket.toObject(),
-        plan: plan ? {
-          plan_id: plan.plan_id,
-          title: plan.title,
-          description: plan.description,
-          location_text: plan.location_text,
-          date: plan.date,
-          time: plan.time,
-          media: plan.media,
-          ticket_image: plan.ticket_image || null,
-          updated_at: plan.updated_at || null,
-          passes: plan.passes || [],
-          add_details: filteredAddDetails,
-          category_main: plan.category_main || null,
-          category_sub: plan.category_sub || [],
-          group_id: plan.group_id || null
-        } : null,
-        user: user ? { user_id: user.user_id, name: user.name, profile_image: user.profile_image } : null
-      }
+        plan: plan
+          ? {
+              plan_id: plan.plan_id,
+              title: plan.title,
+              description: plan.description,
+              location_text: plan.location_text,
+              date: plan.date,
+              time: plan.time,
+              media: plan.media,
+              ticket_image: plan.ticket_image || null,
+              updated_at: plan.updated_at || null,
+              passes: plan.passes || [],
+              add_details: plan.add_details || [], // ✅ SAME AS NORMAL
+              category_main: plan.category_main || null,
+              category_sub: plan.category_sub || [],
+              group_id: plan.group_id || null,
+            }
+          : null,
+        user: user
+          ? {
+              user_id: user.user_id,
+              name: user.name,
+              profile_image: user.profile_image,
+            }
+          : null,
+      },
     });
   } catch (error) {
     console.error('getYashvardhanTicket:', error);
     return sendError(res, error.message, 500);
   }
 };
-
 /**
  * Scan QR code and check in user
  */
