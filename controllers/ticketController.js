@@ -431,10 +431,12 @@ exports.getUserTicket = async (req, res) => {
           time: plan.time,
           media: plan.media,
           ticket_image: plan.ticket_image || null,
+          updated_at: plan.updated_at || null,
           passes: plan.passes || [],
           add_details: plan.add_details || [],
           category_main: plan.category_main || null,
           category_sub: plan.category_sub || [],
+          group_id: plan.group_id || null
         } : null,
         user: user ? {
           user_id: user.user_id,
@@ -444,6 +446,7 @@ exports.getUserTicket = async (req, res) => {
       }
     });
   } catch (error) {
+    console.error('getUserTicket:', error);
     return sendError(res, error.message, 500);
   }
 };
@@ -586,6 +589,7 @@ exports.getYashvardhanTicket = async (req, res) => {
           time: plan.time,
           media: plan.media,
           ticket_image: plan.ticket_image || null,
+          updated_at: plan.updated_at || null,
           passes: plan.passes || [],
           add_details: filteredAddDetails,
           category_main: plan.category_main || null,
