@@ -565,6 +565,15 @@ exports.getYashvardhanTicket = async (req, res) => {
     if (!ticket) return sendError(res, 'Ticket not found', 404);
     const plan = await BusinessPlan.findOne({ plan_id }).lean();
     const user = await User.findOne({ user_id }).lean();
+    
+    // Filter out location from add_details for Yashvardhan (don't show location tag on download)
+    const filteredAddDetails = plan && Array.isArray(plan.add_details)
+      ? plan.add_details.filter(d => {
+          const detailType = (d.detail_type || '').toLowerCase();
+          return !detailType.includes('location') && !detailType.includes('venue') && !detailType.includes('address');
+        })
+      : [];
+    
     return sendSuccess(res, 'Ticket retrieved', {
       ticket: {
         ...ticket.toObject(),
@@ -578,9 +587,10 @@ exports.getYashvardhanTicket = async (req, res) => {
           media: plan.media,
           ticket_image: plan.ticket_image || null,
           passes: plan.passes || [],
-          add_details: plan.add_details || [],
+          add_details: filteredAddDetails,
           category_main: plan.category_main || null,
-          category_sub: plan.category_sub || []
+          category_sub: plan.category_sub || [],
+          group_id: plan.group_id || null
         } : null,
         user: user ? { user_id: user.user_id, name: user.name, profile_image: user.profile_image } : null
       }
