@@ -22,6 +22,7 @@ const uploadRoutes = require('./uploadRoutes');
 const ticketRoutes = require('./ticketRoutes');
 const businessAnalyticsRoutes = require('./businessAnalyticsRoutes');
 const formRoutes = require('./formRoutes');
+const yasvardhanRoutes = require('./yasvardhanRoutes');
 
 // API routes
 router.use('/auth', authRoutes);
@@ -48,6 +49,7 @@ router.use('/post', savedPostRoutes);
 router.use('/ticket', ticketRoutes);
 router.use('/analytics/business', businessAnalyticsRoutes);
 router.use('/form', formRoutes);
+router.use('/yasvardhan', yasvardhanRoutes);
 
 // Health check
 router.get('/health', (req, res) => {

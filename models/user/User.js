@@ -27,6 +27,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  age_range: {
+    type: String,
+    default: null
+  },
   gender: {
     type: String,
     enum: ['male', 'female', 'other'],
@@ -43,6 +47,26 @@ const userSchema = new mongoose.Schema({
     facebook: { type: String, default: null },
     snapchat: { type: String, default: null },
     google_drive: { type: String, default: null },
+  },
+  eula_accepted_at: {
+    type: Date,
+    default: null
+  },
+  eula_version: {
+    type: String,
+    default: null
+  },
+  is_banned: {
+    type: Boolean,
+    default: false
+  },
+  banned_at: {
+    type: Date,
+    default: null
+  },
+  ban_reason: {
+    type: String,
+    default: null
   },
   is_business: {
     type: Boolean,

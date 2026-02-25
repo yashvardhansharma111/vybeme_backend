@@ -25,11 +25,14 @@ exports.getMe = async (req, res) => {
       profile_image: user.profile_image,
       phone_number: user.phone_number || null,
       bio: user.bio,
+      age_range: user.age_range ?? null,
       gender: user.gender,
       interests: user.interests || [],
       is_business: user.is_business,
       business_id: user.business_id,
       social_media: user.social_media || {},
+      eula_accepted_at: user.eula_accepted_at ?? null,
+      eula_version: user.eula_version ?? null,
     };
     return sendSuccess(res, 'Profile retrieved successfully', profile);
   } catch (error) {
@@ -65,6 +68,7 @@ exports.getUserProfile = async (req, res) => {
       name: user.name,
       profile_image: user.profile_image,
       bio: user.bio,
+      age_range: user.age_range ?? null,
       gender: user.gender,
       is_business: user.is_business,
       interests: user.interests || [],
@@ -92,7 +96,7 @@ exports.getUserProfile = async (req, res) => {
 exports.updateProfile = async (req, res) => {
   try {
     const { session_id } = req.body;
-    const { name, profile_image, bio, gender, is_business } = req.body;
+    const { name, profile_image, bio, gender, is_business, age_range, eula_version, accept_eula } = req.body;
     
     const session = await UserSession.findOne({ session_id });
     if (!session || !session.user_id) {
@@ -107,7 +111,12 @@ exports.updateProfile = async (req, res) => {
     if (name !== undefined) user.name = name;
     if (profile_image !== undefined) user.profile_image = profile_image;
     if (bio !== undefined) user.bio = bio;
+    if (age_range !== undefined) user.age_range = age_range;
     if (gender !== undefined) user.gender = gender;
+    if (accept_eula === true) {
+      user.eula_accepted_at = new Date();
+      user.eula_version = eula_version || user.eula_version || null;
+    }
     if (is_business !== undefined) user.is_business = !!is_business;
     if (req.body.interests !== undefined) user.interests = req.body.interests;
     if (req.body.social_media !== undefined) {

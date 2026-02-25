@@ -162,6 +162,9 @@ exports.verifyOTP = async (req, res, next) => {
       if (user.phone_number !== phone_number && phone_number.startsWith('+91')) {
         user.phone_number = phone_number;
       }
+      if (user.is_banned) {
+        return sendError(res, 'Your account has been banned. Please contact support.', 403);
+      }
       await user.save();
     }
     
