@@ -1,4 +1,4 @@
-const { ChatGroup, ChatMessage, PollMessage } = require('../models');
+const { ChatGroup, ChatMessage, PollMessage, UserBlock } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
 
 // In-memory typing indicators: group_id -> { user_id -> lastTypingAt }
@@ -374,6 +374,22 @@ exports.sendMessage = async (req, res) => {
       return sendError(res, 'You are not a member of this chat. Join the plan to send messages.', 403);
     }
 
+    // Block rule: for 1-on-1 chats, prevent sending if either side blocked the other
+    if (members.length === 2) {
+      const otherUserId = members.find((m) => String(m) !== String(user_id));
+      if (otherUserId) {
+        const block = await UserBlock.findOne({
+          $or: [
+            { blocker_id: user_id, blocked_user_id: otherUserId },
+            { blocker_id: otherUserId, blocked_user_id: user_id }
+          ]
+        }).lean();
+        if (block) {
+          return sendError(res, 'You cannot message this user.', 403);
+        }
+      }
+    }
+
     // Announcement groups: only the group owner (created_by) can send messages and photos
     if (group.is_announcement_group && String(group.created_by) !== String(user_id)) {
       return sendError(res, 'Only the group owner can send messages in this announcement group.', 403);
@@ -437,11 +453,27 @@ exports.getMessages = async (req, res) => {
     const { User } = require('../models');
     const { BasePlan } = require('../models');
     const { PollMessage } = require('../models');
+
+    const currentUserId = req.user?.user_id || req.user?.id;
+    let blockedUserIds = new Set();
+    if (currentUserId) {
+      const blocks = await UserBlock.find({
+        $or: [{ blocker_id: currentUserId }, { blocked_user_id: currentUserId }]
+      }).lean();
+      blocks.forEach((b) => {
+        if (String(b.blocker_id) === String(currentUserId)) blockedUserIds.add(String(b.blocked_user_id));
+        if (String(b.blocked_user_id) === String(currentUserId)) blockedUserIds.add(String(b.blocker_id));
+      });
+    }
     
-    const messages = await ChatMessage.find({ group_id })
+    let messages = await ChatMessage.find({ group_id })
       .sort({ timestamp: 1 })
       .limit(100)
       .lean();
+
+    if (blockedUserIds.size > 0) {
+      messages = messages.filter((m) => !blockedUserIds.has(String(m.user_id)));
+    }
     
     // Enrich messages with user info and poll data
     const enrichedMessages = await Promise.all(
@@ -523,7 +555,6 @@ exports.getMessages = async (req, res) => {
       typing_users = typingUsers.map((u) => ({ user_id: u.user_id, name: u.name || 'Someone' }));
     }
 
-    const currentUserId = req.user?.user_id || req.user?.id;
     if (currentUserId && group_id) {
       const groupDoc = await ChatGroup.findOne({ group_id });
       if (groupDoc) {
@@ -534,9 +565,13 @@ exports.getMessages = async (req, res) => {
       }
     }
 
+    const filteredTypingUsers = blockedUserIds.size > 0
+      ? typing_users.filter((u) => !blockedUserIds.has(String(u.user_id)))
+      : typing_users;
+
     return sendSuccess(res, 'Messages retrieved successfully', {
       messages: enrichedMessages,
-      typing_users
+      typing_users: filteredTypingUsers
     });
   } catch (error) {
     return sendError(res, error.message, 500);
@@ -733,6 +768,15 @@ exports.getChatLists = async (req, res) => {
     if (!user_id) {
       return sendError(res, 'User ID is required', 400);
     }
+
+    let blockedUserIds = new Set();
+    const blocks = await UserBlock.find({
+      $or: [{ blocker_id: user_id }, { blocked_user_id: user_id }]
+    }).lean();
+    blocks.forEach((b) => {
+      if (String(b.blocker_id) === String(user_id)) blockedUserIds.add(String(b.blocked_user_id));
+      if (String(b.blocked_user_id) === String(user_id)) blockedUserIds.add(String(b.blocker_id));
+    });
     
     // Get all groups where user is a member (including individual chats)
     // Try multiple query approaches to ensure we find the groups
@@ -832,6 +876,9 @@ exports.getChatLists = async (req, res) => {
       if (group.members.length === 2) {
         const otherUserId = group.members.find(id => id !== user_id);
         if (otherUserId) {
+          if (blockedUserIds.has(String(otherUserId))) {
+            continue;
+          }
           otherUser = await User.findOne({ user_id: otherUserId }).lean();
         }
       }

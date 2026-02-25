@@ -1,4 +1,4 @@
-const { BasePlan, RegularPlan, BusinessPlan, Repost, User } = require('../models');
+const { BasePlan, RegularPlan, BusinessPlan, Repost, User, UserBlock } = require('../models');
 const { sendSuccess, sendError, paginate } = require('../utils');
 const { rankPlansForUser, rankPlansForGuest } = require('../utils/ranking');
 
@@ -49,8 +49,23 @@ exports.getHomeFeed = async (req, res) => {
       user = await User.findOne({ user_id }).lean();
     }
 
+    // Block filter: hide posts from users that the current user blocked OR users who blocked the current user
+    let blockedUserIds = new Set();
+    if (user_id) {
+      const blocks = await UserBlock.find({
+        $or: [{ blocker_id: user_id }, { blocked_user_id: user_id }]
+      }).lean();
+      blocks.forEach((b) => {
+        if (String(b.blocker_id) === String(user_id)) blockedUserIds.add(String(b.blocked_user_id));
+        if (String(b.blocked_user_id) === String(user_id)) blockedUserIds.add(String(b.blocker_id));
+      });
+    }
+
     // Women-only posts are visible to everyone; only registration is restricted to women
     let plansFiltered = plans;
+    if (blockedUserIds.size > 0) {
+      plansFiltered = plansFiltered.filter((p) => !blockedUserIds.has(String(p.user_id)));
+    }
 
     // Apply ranking algorithm
     let rankedPlans;
@@ -86,6 +101,10 @@ exports.getHomeFeed = async (req, res) => {
       .map(repost => {
         const originalPlan = originalPlansMap[repost.original_plan_id];
         if (!originalPlan) return null;
+        if (blockedUserIds.size > 0) {
+          if (blockedUserIds.has(String(repost.repost_author_id))) return null;
+          if (blockedUserIds.has(String(originalPlan.user_id))) return null;
+        }
         return {
           ...originalPlan,
           created_at: repost.created_at,
@@ -256,10 +275,24 @@ exports.refreshFeed = async (req, res) => {
 exports.getPost = async (req, res) => {
   try {
     const { post_id } = req.params;
+    const { user_id } = req.query;
     const plan = await BasePlan.findOne({ plan_id: post_id });
     
     if (!plan) {
       return sendError(res, 'Post not found', 404);
+    }
+
+    // Optional block filter (only when caller provides user_id)
+    if (user_id) {
+      const blocks = await UserBlock.find({
+        $or: [
+          { blocker_id: user_id, blocked_user_id: plan.user_id },
+          { blocker_id: plan.user_id, blocked_user_id: user_id }
+        ]
+      }).lean();
+      if (blocks.length > 0) {
+        return sendError(res, 'Post not available', 403);
+      }
     }
     
     // Increment views
