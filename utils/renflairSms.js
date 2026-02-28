@@ -15,7 +15,7 @@ function getApiKey() {
 
 function get(url) {
   return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
+    https.get(url, {family: 4},(res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => resolve({ statusCode: res.statusCode, body: data }));
