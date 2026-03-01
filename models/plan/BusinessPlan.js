@@ -142,6 +142,10 @@ const businessPlanSchema = new mongoose.Schema({
   form_id: {
     type: String,
     default: null // Reference to custom form for registration
+  },
+  registration_limit: {
+    type: Number,
+    default: null // Max number of attendees; null = unlimited
   }
 });
 

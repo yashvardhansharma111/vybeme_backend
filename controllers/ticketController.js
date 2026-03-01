@@ -92,10 +92,10 @@ exports.registerForEvent = async (req, res) => {
     // Get registration count (needed for checkin code generation)
     let registrationCount = await Registration.countDocuments({ plan_id });
     
-    // Max 20 users per event (first come, first served) - COMMENTED OUT: removed limit
-    // if (registrationCount >= 20) {
-    //   return sendError(res, "Event is full. Better luck next time.", 400);
-    // }
+    // Check registration limit if set
+    if (plan.registration_limit && registrationCount >= plan.registration_limit) {
+      return sendError(res, `This event has reached its capacity (${plan.registration_limit} attendees). No more registrations are allowed.`, 400);
+    }
 
     // Determine if this is a free event without ticket types (no passes configured)
     const hasPasses = Array.isArray(plan.passes) && plan.passes.length > 0;
@@ -846,6 +846,29 @@ exports.getAttendeeList = async (req, res) => {
     });
   } catch (error) {
     console.error('Error getting attendee list:', error);
+    return sendError(res, error.message, 500);
+  }
+};
+
+/**
+ * Get registration count for a plan (public endpoint - no auth required)
+ */
+exports.getRegistrationCount = async (req, res) => {
+  try {
+    const { plan_id } = req.params;
+    
+    // Get plan to verify it exists
+    const plan = await BusinessPlan.findOne({ plan_id }).lean();
+    if (!plan) {
+      return sendError(res, 'Event not found', 404);
+    }
+    
+    // Count registrations
+    const count = await Registration.countDocuments({ plan_id });
+    
+    return sendSuccess(res, 'Registration count retrieved', { count });
+  } catch (error) {
+    console.error('Error getting registration count:', error);
     return sendError(res, error.message, 500);
   }
 };

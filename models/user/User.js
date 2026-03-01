@@ -47,6 +47,8 @@ const userSchema = new mongoose.Schema({
     facebook: { type: String, default: null },
     snapchat: { type: String, default: null },
     google_drive: { type: String, default: null },
+    whatsapp: { type: String, default: null }, // phone number or wa.me link
+    strava: { type: String, default: null }, // strava profile URL or id
   },
   eula_accepted_at: {
     type: Date,
