@@ -38,9 +38,14 @@ exports.getHomeFeed = async (req, res) => {
       query.location_coordinates = { $exists: true };
     }
     
-    // Get all regular posts (we'll rank them, so get more than needed)
+    // Get posts (we'll rank them, so fetch more than needed).
+    // Important: include offset in fetch size so pagination returns different items.
+    const safeLimit = Math.min(50, Math.max(1, parseInt(limit)));
+    const safeOffset = Math.max(0, parseInt(offset));
+    const fetchSize = Math.min(250, (safeOffset + safeLimit) * 5);
     const plans = await BasePlan.find(query)
-      .limit(parseInt(limit) * 5) // Get more plans to rank and filter
+      .sort({ created_at: -1 })
+      .limit(fetchSize)
       .lean();
     
     // Fetch user data if user_id is provided (for registered users)
@@ -84,7 +89,7 @@ exports.getHomeFeed = async (req, res) => {
     // Get reposts as separate feed items (also need to rank them)
     const allReposts = await Repost.find({})
       .sort({ created_at: -1 })
-      .limit(parseInt(limit) * 2)
+      .limit(Math.min(200, safeLimit * 2 + safeOffset))
       .lean();
     
     // Get original plans for reposts
@@ -125,7 +130,7 @@ exports.getHomeFeed = async (req, res) => {
     
     // Format regular posts (mark if they're reposted)
     const regularFeed = rankedPlans
-      .slice(parseInt(offset), parseInt(offset) + parseInt(limit))
+      .slice(safeOffset, safeOffset + safeLimit)
       .map(plan => {
         const isReposted = !!repostMap[plan.plan_id];
         const item = {
@@ -161,7 +166,7 @@ exports.getHomeFeed = async (req, res) => {
     
     // Format reposts as separate feed items
     const repostFeed = rankedReposts
-      .slice(0, Math.floor(parseInt(limit) * 0.3)) // 30% of feed can be reposts
+      .slice(0, Math.floor(safeLimit * 0.3)) // 30% of feed can be reposts
       .map(plan => {
         const repost = plan._repostData;
         const item = {
@@ -215,7 +220,7 @@ exports.getHomeFeed = async (req, res) => {
     });
     
     // Remove ranking scores from final output (optional, for cleaner API response)
-    const finalFeed = combinedFeed.slice(0, parseInt(limit)).map(item => {
+    const finalFeed = combinedFeed.slice(0, safeLimit).map(item => {
       const { _rankingScore, ...rest } = item;
       return rest;
     });

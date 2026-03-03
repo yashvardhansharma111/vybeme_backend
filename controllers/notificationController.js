@@ -9,22 +9,15 @@ const INDIVIDUAL_TYPES_REGULAR = ['registration_successful', 'event_ended', 'fre
  */
 exports.getNotifications = async (req, res) => {
   try {
-    const { user_id } = req.query;
+    const { user_id, limit = '20', offset = '0' } = req.query;
+    const safeLimit = Math.min(50, Math.max(1, parseInt(String(limit), 10) || 20));
+    const safeOffset = Math.max(0, parseInt(String(offset), 10) || 0);
+
     const notifications = await Notification.find({ user_id })
       .sort({ created_at: -1 })
-      .limit(100)
+      .skip(safeOffset)
+      .limit(safeLimit)
       .lean();
-
-    // Log: total and breakdown by type (so we know if individual notifs exist)
-    const typeCounts = {};
-    let individualCount = 0;
-    for (const n of notifications) {
-      typeCounts[n.type] = (typeCounts[n.type] || 0) + 1;
-      if (INDIVIDUAL_TYPES_BUSINESS.includes(n.type) || INDIVIDUAL_TYPES_REGULAR.includes(n.type)) {
-        individualCount++;
-      }
-    }
-    console.log('[getNotifications] user_id:', user_id, '| total:', notifications.length, '| by type:', typeCounts, '| individual (spec) count:', individualCount);
 
     // Group notifications by post_id
     const grouped = {};
@@ -41,12 +34,76 @@ exports.getNotifications = async (req, res) => {
       grouped[key].interactions.push(notif);
     }
 
+    // Bulk fetch posts/users/planInteractions so we avoid N+1 queries
+    const postIds = Array.from(
+      new Set(notifications.map((n) => n.source_plan_id).filter(Boolean).map(String))
+    );
+    const userIds = Array.from(
+      new Set(
+        notifications
+          .map((n) => n.source_user_id)
+          .filter((id) => id && id !== 'system')
+          .map(String)
+      )
+    );
+    const requestIds = Array.from(
+      new Set(
+        notifications
+          .map((n) => n?.payload?.request_id)
+          .filter(Boolean)
+          .map(String)
+      )
+    );
+
+    const [posts, users, planInteractions] = await Promise.all([
+      postIds.length > 0
+        ? BasePlan.find({ plan_id: { $in: postIds }, deleted_at: null }).lean()
+        : Promise.resolve([]),
+      userIds.length > 0
+        ? User.find({ user_id: { $in: userIds } }).lean()
+        : Promise.resolve([]),
+      requestIds.length > 0
+        ? PlanInteraction.find({ interaction_id: { $in: requestIds } }).lean()
+        : Promise.resolve([]),
+    ]);
+
+    const postMap = new Map(posts.map((p) => [String(p.plan_id), p]));
+    const userMap = new Map(users.map((u) => [String(u.user_id), u]));
+    const planInteractionMap = new Map(planInteractions.map((pi) => [String(pi.interaction_id), pi]));
+
+    // Prefetch registration counts for event-ended notifications if needed
+    const eventEndedPlanIds = Array.from(
+      new Set(
+        notifications
+          .filter((n) => n?.source_plan_id && (n.type === 'event_ended_registered' || n.type === 'event_ended_attended'))
+          .map((n) => String(n.source_plan_id))
+      )
+    );
+
+    const [regCountsAgg, attCountsAgg] = await Promise.all([
+      eventEndedPlanIds.length > 0
+        ? Registration.aggregate([
+            { $match: { plan_id: { $in: eventEndedPlanIds }, status: { $in: ['pending', 'approved'] } } },
+            { $group: { _id: '$plan_id', count: { $sum: 1 } } },
+          ])
+        : Promise.resolve([]),
+      eventEndedPlanIds.length > 0
+        ? Registration.aggregate([
+            { $match: { plan_id: { $in: eventEndedPlanIds }, checked_in: true } },
+            { $group: { _id: '$plan_id', count: { $sum: 1 } } },
+          ])
+        : Promise.resolve([]),
+    ]);
+
+    const regCountMap = new Map(regCountsAgg.map((r) => [String(r._id), r.count]));
+    const attCountMap = new Map(attCountsAgg.map((r) => [String(r._id), r.count]));
+
     // Fetch post and user details; build plain interaction objects for frontend
     const result = [];
     for (const key in grouped) {
       const group = grouped[key];
       if (group.post_id) {
-        const post = await BasePlan.findOne({ plan_id: group.post_id }).lean();
+        const post = postMap.get(String(group.post_id)) || null;
         if (post) {
           group.post = {
             plan_id: post.plan_id,
@@ -63,7 +120,7 @@ exports.getNotifications = async (req, res) => {
       for (const interaction of group.interactions) {
         let userObj = { user_id: 'system', name: '', profile_image: null };
         if (interaction.source_user_id !== 'system') {
-          const user = await User.findOne({ user_id: interaction.source_user_id }).lean();
+          const user = userMap.get(String(interaction.source_user_id)) || null;
           if (user) {
             userObj = {
               user_id: user.user_id,
@@ -81,9 +138,7 @@ exports.getNotifications = async (req, res) => {
 
         const payload = interaction.payload ? { ...interaction.payload } : {};
         if (payload.request_id) {
-          const planInteraction = await PlanInteraction.findOne({
-            interaction_id: payload.request_id
-          }).lean();
+          const planInteraction = planInteractionMap.get(String(payload.request_id)) || null;
           if (planInteraction) {
             payload.status = planInteraction.status;
             payload.approved = planInteraction.status === 'approved';
@@ -96,12 +151,8 @@ exports.getNotifications = async (req, res) => {
           const needReg = payload.registered_count == null || payload.registered_count === 0;
           const needAtt = interaction.type === 'event_ended_attended' && (payload.scanned_count == null);
           if (needReg || needAtt) {
-            const [regCount, attCount] = await Promise.all([
-              Registration.countDocuments({ plan_id: planId, status: { $in: ['pending', 'approved'] } }),
-              Registration.countDocuments({ plan_id: planId, checked_in: true })
-            ]);
-            if (needReg) payload.registered_count = regCount;
-            if (needAtt) payload.scanned_count = attCount;
+            if (needReg) payload.registered_count = regCountMap.get(String(planId)) ?? 0;
+            if (needAtt) payload.scanned_count = attCountMap.get(String(planId)) ?? 0;
           }
         }
 
@@ -123,10 +174,11 @@ exports.getNotifications = async (req, res) => {
     // Sort by most recent interaction
     result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-    const totalIndividualInResult = result.reduce((acc, g) => acc + g.interactions.filter(i => INDIVIDUAL_TYPES_BUSINESS.includes(i.type) || INDIVIDUAL_TYPES_REGULAR.includes(i.type)).length, 0);
-    console.log('[getNotifications] result groups:', result.length, '| total interactions in response:', result.reduce((acc, g) => acc + g.interactions.length, 0), '| individual types in response:', totalIndividualInResult);
-
-    return sendSuccess(res, 'Notifications retrieved successfully', result);
+    return sendSuccess(res, 'Notifications retrieved successfully', {
+      groups: result,
+      next_offset: safeOffset + notifications.length,
+      has_more: notifications.length === safeLimit
+    });
   } catch (error) {
     console.error('[getNotifications] error:', error.message);
     return sendError(res, error.message, 500);

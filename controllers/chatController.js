@@ -454,6 +454,9 @@ exports.getMessages = async (req, res) => {
     const { BasePlan } = require('../models');
     const { PollMessage } = require('../models');
 
+    const { limit = '50', before } = req.query;
+    const safeLimit = Math.min(100, Math.max(1, parseInt(String(limit), 10) || 50));
+
     const currentUserId = req.user?.user_id || req.user?.id;
     let blockedUserIds = new Set();
     if (currentUserId) {
@@ -466,19 +469,36 @@ exports.getMessages = async (req, res) => {
       });
     }
     
-    let messages = await ChatMessage.find({ group_id })
-      .sort({ timestamp: 1 })
-      .limit(100)
+    const msgQuery = { group_id };
+    if (before) {
+      const beforeDate = new Date(String(before));
+      if (!isNaN(beforeDate.getTime())) {
+        msgQuery.timestamp = { $lt: beforeDate };
+      }
+    }
+
+    let messages = await ChatMessage.find(msgQuery)
+      .sort({ timestamp: -1 })
+      .limit(safeLimit)
       .lean();
+
+    // Return ascending for UI rendering convenience
+    messages = messages.reverse();
 
     if (blockedUserIds.size > 0) {
       messages = messages.filter((m) => !blockedUserIds.has(String(m.user_id)));
     }
     
     // Enrich messages with user info and poll data
+    const uniqueUserIds = Array.from(new Set(messages.map((m) => String(m.user_id))));
+    const users = uniqueUserIds.length > 0
+      ? await User.find({ user_id: { $in: uniqueUserIds } }).lean()
+      : [];
+    const userMap = new Map(users.map((u) => [String(u.user_id), u]));
+
     const enrichedMessages = await Promise.all(
       messages.map(async (msg) => {
-        const user = await User.findOne({ user_id: msg.user_id }).lean();
+        const user = userMap.get(String(msg.user_id)) || null;
         let pollData = null;
         
         if (msg.type === 'poll' && msg.content?.poll_id) {
@@ -569,9 +589,13 @@ exports.getMessages = async (req, res) => {
       ? typing_users.filter((u) => !blockedUserIds.has(String(u.user_id)))
       : typing_users;
 
+    const next_before = enrichedMessages.length > 0 ? enrichedMessages[0].timestamp : null;
+
     return sendSuccess(res, 'Messages retrieved successfully', {
       messages: enrichedMessages,
-      typing_users: filteredTypingUsers
+      typing_users: filteredTypingUsers,
+      next_before,
+      has_more: enrichedMessages.length === safeLimit
     });
   } catch (error) {
     return sendError(res, error.message, 500);
@@ -801,44 +825,6 @@ exports.getChatLists = async (req, res) => {
       if (exprGroups.length > 0) userGroups = exprGroups;
     }
     
-    console.log(`📋 Found ${userGroups.length} groups for user ${user_id}`);
-    
-    // Debug: Check all groups to see what's in the database
-    const allGroups = await ChatGroup.find({ is_closed: false }).lean();
-    console.log(`🔍 Total groups in database: ${allGroups.length}`);
-    if (allGroups.length > 0) {
-      allGroups.forEach(g => {
-        const isMember = g.members && g.members.includes(user_id);
-        console.log(`  - Group ${g.group_id}: plan_id=${g.plan_id}, members=[${(g.members || []).join(', ')}], group_name="${g.group_name}", user_is_member=${isMember}`);
-      });
-    } else {
-      console.log(`  ⚠️ No groups found in database at all!`);
-    }
-    
-    // Also check if user_id matches any created_by
-    const groupsCreatedByUser = await ChatGroup.find({
-      created_by: user_id,
-      is_closed: false
-    }).lean();
-    console.log(`🔍 Groups created by user ${user_id}: ${groupsCreatedByUser.length}`);
-    if (groupsCreatedByUser.length > 0) {
-      groupsCreatedByUser.forEach(g => {
-        const membersList = (g.members || []).map(m => `${m} (${typeof m})`).join(', ');
-        console.log(`  - Created group ${g.group_id}: members=[${membersList}], user_id type=${typeof user_id}`);
-        // Manually check if user_id is in members
-        const manuallyCheck = (g.members || []).some(m => String(m) === String(user_id));
-        console.log(`    Manual check (String comparison): user is member = ${manuallyCheck}`);
-      });
-    }
-    
-    // Try a direct query to see if we can find groups with this user_id as a string
-    console.log(`🔍 Querying with user_id as string: "${String(user_id)}"`);
-    const testQuery = await ChatGroup.find({
-      $expr: { $in: [String(user_id), { $map: { input: "$members", as: "m", in: { $toString: "$$m" } } }] },
-      is_closed: false
-    }).lean();
-    console.log(`🔍 Found ${testQuery.length} groups using $expr query`);
-    
     // Get all plans where user is a member of a group
     const planIds = userGroups.map(g => g.plan_id);
     const plans = await BasePlan.find({
@@ -846,8 +832,6 @@ exports.getChatLists = async (req, res) => {
       deleted_at: null,
       post_status: { $ne: 'deleted' } // Exclude deleted plans, but include all other statuses
     }).lean();
-    
-    console.log(`📋 Found ${plans.length} plans for ${planIds.length} groups`);
     
     // Separate into "Their Plans" (plans created by others) and "My Plans" (plans created by user)
     const theirPlans = [];
@@ -857,11 +841,8 @@ exports.getChatLists = async (req, res) => {
     for (const group of userGroups) {
       const plan = plans.find(p => p.plan_id === group.plan_id);
       if (!plan) {
-        console.log(`⚠️ Group ${group.group_id} has plan_id ${group.plan_id} but plan not found in database`);
         continue;
       }
-      
-      console.log(`✅ Processing group ${group.group_id} for plan ${plan.plan_id} (type: ${plan.type}, members: ${group.members.length})`);
       
       // Get last message
       const lastMessage = await ChatMessage.findOne({ group_id: group.group_id })
