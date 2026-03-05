@@ -90,7 +90,10 @@ exports.registerForEvent = async (req, res) => {
     }
 
     // Get registration count (needed for checkin code generation)
-    let registrationCount = await Registration.countDocuments({ plan_id });
+    let registrationCount = await Registration.countDocuments({
+      plan_id,
+      status: { $in: ['pending', 'approved'] }
+    });
     
     // Check registration limit if set
     if (plan.registration_limit && registrationCount >= plan.registration_limit) {
@@ -985,6 +988,24 @@ exports.createOrder = async (req, res) => {
       return sendError(res, 'You have already registered for this event', 400);
     }
 
+    // Check registration limit for paid events before creating an order.
+    // Also consider other active created orders as temporary reservations to avoid overselling.
+    if (plan.registration_limit) {
+      const now = Date.now();
+      const HOLD_MS = 10 * 60 * 1000; // 10 minutes
+      const [registrationCount, activeHolds] = await Promise.all([
+        Registration.countDocuments({ plan_id, status: { $in: ['pending', 'approved'] } }),
+        PaymentOrder.countDocuments({
+          plan_id,
+          status: 'created',
+          created_at: { $gte: new Date(now - HOLD_MS) }
+        })
+      ]);
+      if (registrationCount + activeHolds >= plan.registration_limit) {
+        return sendError(res, `This event has reached its capacity (${plan.registration_limit} attendees). No more registrations are allowed.`, 400);
+      }
+    }
+
     // Max 20 users per event (first come, first served) - COMMENTED OUT: removed limit
     // const registrationCount = await Registration.countDocuments({ plan_id });
     // if (registrationCount >= 20) {
@@ -1073,6 +1094,28 @@ exports.verifyPayment = async (req, res) => {
       const profileGender = (registeringUser?.gender || '').toLowerCase();
       if (profileGender !== 'female') {
         return sendError(res, 'Only women can register for this event', 403);
+      }
+    }
+
+    // Re-check registration limit at fulfillment time (race safety)
+    if (plan.registration_limit) {
+      const now = Date.now();
+      const HOLD_MS = 10 * 60 * 1000; // 10 minutes
+      const [registrationCount, activeHolds] = await Promise.all([
+        Registration.countDocuments({ plan_id, status: { $in: ['pending', 'approved'] } }),
+        PaymentOrder.countDocuments({
+          plan_id,
+          status: 'created',
+          created_at: { $gte: new Date(now - HOLD_MS) },
+          razorpay_order_id: { $ne: razorpay_order_id }
+        })
+      ]);
+      if (registrationCount + activeHolds >= plan.registration_limit) {
+        await PaymentOrder.updateOne(
+          { razorpay_order_id },
+          { status: 'failed', updated_at: new Date() }
+        );
+        return sendError(res, `This event has reached its capacity (${plan.registration_limit} attendees). Your payment will be refunded.`, 400);
       }
     }
 
