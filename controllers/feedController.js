@@ -160,6 +160,7 @@ exports.getHomeFeed = async (req, res) => {
           item.location_text = plan.location_text;
           item.date = plan.date;
           item.time = plan.time;
+          item.add_details = plan.add_details || [];
         }
         return item;
       });
@@ -204,6 +205,7 @@ exports.getHomeFeed = async (req, res) => {
           item.location_text = plan.location_text;
           item.date = plan.date;
           item.time = plan.time;
+          item.add_details = plan.add_details || [];
         }
         return item;
       });

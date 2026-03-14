@@ -634,5 +634,52 @@ exports.rejectJoinRequest = async (req, res) => {
   }
 };
 
+/**
+ * Get joined users for a regular plan (approved interactions: join, reaction, comment).
+ * Public endpoint – returns list of users who have joined, for guest list modal.
+ */
+exports.getJoinedUsers = async (req, res) => {
+  try {
+    const { plan_id } = req.params;
+    const { BasePlan, User } = require('../models');
+
+    const plan = await BasePlan.findOne({ plan_id }).lean();
+    if (!plan) {
+      return sendError(res, 'Post not found', 404);
+    }
+    if (plan.type === 'business') {
+      return sendError(res, 'Use /ticket/guest-list for business events', 400);
+    }
+
+    const interactions = await PlanInteraction.find({
+      plan_id,
+      status: 'approved',
+    })
+      .sort({ created_at: -1 })
+      .lean();
+
+    const userIds = [...new Set(interactions.map((i) => i.user_id))];
+    const guestList = await Promise.all(
+      userIds.map(async (uid) => {
+        const user = await User.findOne({ user_id: uid }).lean();
+        return {
+          user_id: uid,
+          name: user?.name || 'Unknown',
+          profile_image: user?.profile_image || null,
+          bio: user?.bio || '',
+        };
+      })
+    );
+
+    return sendSuccess(res, 'Joined users retrieved successfully', {
+      guests: guestList,
+      total: guestList.length,
+    });
+  } catch (error) {
+    console.error('Error in getJoinedUsers:', error);
+    return sendError(res, error.message, 500);
+  }
+};
+
 module.exports = exports;
 

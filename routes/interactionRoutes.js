@@ -20,5 +20,8 @@ router.get('/join/requests/:post_id', authenticate, interactionController.getJoi
 router.post('/join/approve', authenticate, interactionController.approveJoinRequest);
 router.post('/join/reject', authenticate, interactionController.rejectJoinRequest);
 
+// Public: list of users who joined (approved interactions) for guest list modal
+router.get('/joined-users/:plan_id', interactionController.getJoinedUsers);
+
 module.exports = router;
 
