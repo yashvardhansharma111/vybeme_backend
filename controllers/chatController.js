@@ -162,7 +162,7 @@ exports.getGroupDetails = async (req, res) => {
       media: plan.media || [],
       date: plan.date || null,
       time: plan.time || null,
-      joins_count: plan.joins_count ?? (group.members && group.members.length) || 0
+      joins_count: plan.joins_count != null ? plan.joins_count : ((group.members && group.members.length) || 0)
     } : null;
 
     return sendSuccess(res, 'Group details retrieved successfully', {
