@@ -155,14 +155,19 @@ exports.getGroupDetails = async (req, res) => {
       })
     );
     
+    const planPayload = plan ? {
+      plan_id: plan.plan_id,
+      title: plan.title,
+      description: plan.description,
+      media: plan.media || [],
+      date: plan.date || null,
+      time: plan.time || null,
+      joins_count: plan.joins_count ?? (group.members && group.members.length) || 0
+    } : null;
+
     return sendSuccess(res, 'Group details retrieved successfully', {
       ...group,
-      plan: plan ? {
-        plan_id: plan.plan_id,
-        title: plan.title,
-        description: plan.description,
-        media: plan.media || []
-      } : null,
+      plan: planPayload,
       members: members.filter(m => m !== null)
     });
   } catch (error) {
@@ -172,10 +177,12 @@ exports.getGroupDetails = async (req, res) => {
 
 /**
  * Add members to group
+ * For each new member, posts a system message: "<name> was added to the group"
  */
 exports.addMembers = async (req, res) => {
   try {
     const { group_id, member_ids = [] } = req.body;
+    const { User } = require('../models');
     const group = await ChatGroup.findOne({ group_id });
     
     if (!group) {
@@ -185,6 +192,20 @@ exports.addMembers = async (req, res) => {
     const newMembers = member_ids.filter(id => !group.members.includes(id));
     group.members.push(...newMembers);
     await group.save();
+    
+    for (const addedUserId of newMembers) {
+      const addedUser = await User.findOne({ user_id: addedUserId }).lean();
+      const addedName = addedUser?.name || 'Someone';
+      const addedImage = addedUser?.profile_image || null;
+      await ChatMessage.create({
+        message_id: generateId('msg'),
+        group_id: group.group_id,
+        user_id: group.created_by || group.members[0],
+        type: 'system',
+        content: { text: `${addedName} was added to the group`, added_user_id: addedUserId, added_user_name: addedName, added_user_profile_image: addedImage },
+        reactions: []
+      });
+    }
     
     return sendSuccess(res, 'Members added successfully');
   } catch (error) {
@@ -895,22 +916,24 @@ exports.getChatLists = async (req, res) => {
         member_count: group.members.length,
         is_group: group.members.length > 2,
         group_name: group.group_name || (group.members.length === 2 && otherUser ? otherUser.name : plan.title),
-        unread_count: unreadCount
+        unread_count: unreadCount,
+        is_announcement_group: !!group.is_announcement_group
       };
       
       // Check if this is a business plan - business plan groups should always be in "groups" section
       const isBusinessPlan = plan.type === 'business';
+      // Event groups: hide from chat list until there are at least 2 members (creator + 1 other)
+      if (isBusinessPlan && group.members.length < 2) {
+        continue;
+      }
       
       // Individual chats (2 members) go to their_plans or my_plans
       // Group chats (3+ members) go to groups
       // Business plan groups always go to groups, regardless of member count
       // Groups with 1 member (creator only) also go to groups or my_plans
       if (isBusinessPlan) {
-        // Business plan groups always go to groups section
-        groups.push({
-          ...chatItem,
-          members: group.members
-        });
+        // Business plan groups go to groups section (when 2+ members)
+        groups.push({ ...chatItem, members: group.members });
       } else if (group.members.length === 2) {
         // Individual chat - determine if it's "my plan" or "their plan"
         if (plan.user_id === user_id) {
@@ -944,10 +967,18 @@ exports.getChatLists = async (req, res) => {
       const bTime = b.last_message?.timestamp ? new Date(b.last_message.timestamp).getTime() : 0;
       return bTime - aTime;
     };
-    
+    // Sticky: announcement / community group first, then by recency
+    const sortGroupsWithSticky = (a, b) => {
+      const aAnn = !!a.is_announcement_group;
+      const bAnn = !!b.is_announcement_group;
+      if (aAnn && !bAnn) return -1;
+      if (!aAnn && bAnn) return 1;
+      return sortByLastMessage(a, b);
+    };
+
     theirPlans.sort(sortByLastMessage);
     myPlans.sort(sortByLastMessage);
-    groups.sort(sortByLastMessage);
+    groups.sort(sortGroupsWithSticky);
     
     return sendSuccess(res, 'Chat lists retrieved successfully', {
       their_plans: theirPlans,

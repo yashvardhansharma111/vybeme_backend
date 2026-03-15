@@ -231,19 +231,9 @@ exports.registerForEvent = async (req, res) => {
           { $set: { group_id: newGroup.group_id } }
         );
         plan.group_id = newGroup.group_id;
-        
-        // Post welcome message
-        const { ChatMessage, BasePlan } = require('../models');
-        await ChatMessage.create({
-          message_id: generateId('msg'),
-          group_id: newGroup.group_id,
-          user_id: plan.user_id,
-          type: 'text',
-          content: `Welcome to the group for ${plan.title}`,
-          reactions: []
-        });
-        // Automatic "Hi" from joiner disabled – no message sent on behalf of the new member
+        // No automated welcome or "Hi" message when group is created
 
+        const { BasePlan } = require('../models');
         await BasePlan.updateOne(
           { plan_id: plan.plan_id },
           { $inc: { chat_message_count: 1 } }
@@ -1176,15 +1166,7 @@ exports.verifyPayment = async (req, res) => {
           if (!group.members) group.members = [];
           group.members.push(user_id);
           await group.save();
-          const { ChatMessage } = require('../models');
-          await ChatMessage.create({
-            message_id: generateId('msg'),
-            group_id: plan.group_id,
-            user_id,
-            type: 'text',
-            content: 'Hi',
-            reactions: [],
-          });
+          // No automated "Hi" message when user joins event chat
         }
       } catch (e) {
         console.error('Failed to add user to group:', e);

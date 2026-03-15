@@ -192,31 +192,7 @@ exports.createBusinessPost = async (req, res) => {
       console.log(`   - Group name: "${group.group_name}"`);
       console.log(`   - Plan user_id: ${plan.user_id}`);
       console.log(`   - Group members: [${(group.members || []).join(', ')}]`);
-      console.log(`   - Group created_by: ${group.created_by}`);
-      console.log(`   - Plan group_id after save: ${updatedPlan?.group_id || plan.group_id}`);
-      
-      // Post welcome message in the group
-      try {
-        const welcomeMessage = await ChatMessage.create({
-          message_id: generateId('msg'),
-          group_id: group.group_id,
-          user_id: plan.user_id,
-          type: 'text',
-          content: `Welcome to the group for ${plan.title}`,
-          reactions: []
-        });
-        
-        // Update plan chat message count
-        await BasePlan.updateOne(
-          { plan_id: plan.plan_id },
-          { $inc: { chat_message_count: 1 } }
-        );
-        
-        console.log(`✅ Posted welcome message ${welcomeMessage.message_id} in group ${group.group_id}`);
-      } catch (messageError) {
-        console.error('⚠️ Failed to post welcome message:', messageError);
-        // Continue even if message creation fails - don't block post creation
-      }
+      // No automated message on group creation
     } catch (groupError) {
       console.error('⚠️ Failed to auto-create group for business plan:', groupError);
       console.error('   Error details:', groupError.message);

@@ -36,7 +36,7 @@ const chatMessageSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ['text', 'image', 'voice', 'poll', 'plan'],
+    enum: ['text', 'image', 'voice', 'poll', 'plan', 'system'],
     required: true
   },
   content: {
