@@ -1,7 +1,7 @@
 const { Notification, BasePlan, User, PlanInteraction, Registration } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
 
-const INDIVIDUAL_TYPES_BUSINESS = ['post_live', 'event_ended', 'event_ended_registered', 'event_ended_attended', 'free_event_cancelled', 'paid_event_cancelled'];
+const INDIVIDUAL_TYPES_BUSINESS = ['post_live', 'event_ended', 'event_ended_registered', 'event_ended_attended', 'free_event_cancelled', 'paid_event_cancelled', 'event_chat_poll_vote'];
 const INDIVIDUAL_TYPES_REGULAR = ['registration_successful', 'event_ended', 'free_event_cancelled', 'paid_event_cancelled', 'plan_shared_chat'];
 
 /**
@@ -148,8 +148,8 @@ exports.getNotifications = async (req, res) => {
         // For event-ended notifications, backfill registered/attended counts when missing or zero (fixes stored 0)
         const planId = interaction.source_plan_id || group.post_id;
         if (planId && (interaction.type === 'event_ended_registered' || interaction.type === 'event_ended_attended')) {
-          const needReg = payload.registered_count == null || payload.registered_count === 0;
-          const needAtt = interaction.type === 'event_ended_attended' && (payload.scanned_count == null);
+          const needReg = payload.registered_count == null;
+          const needAtt = interaction.type === 'event_ended_attended' && payload.scanned_count == null;
           if (needReg || needAtt) {
             if (needReg) payload.registered_count = regCountMap.get(String(planId)) ?? 0;
             if (needAtt) payload.scanned_count = attCountMap.get(String(planId)) ?? 0;

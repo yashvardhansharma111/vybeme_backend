@@ -16,7 +16,8 @@ const notificationSchema = new mongoose.Schema({
       'comment', 'reaction', 'join', 'repost', 'message',
       'post_live', 'event_ended', 'event_ended_registered', 'event_ended_attended',
       'free_event_cancelled', 'paid_event_cancelled',
-      'registration_successful', 'plan_shared_chat'
+      'registration_successful', 'plan_shared_chat',
+      'event_chat_poll_vote'
     ],
     required: true
   },

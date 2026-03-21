@@ -1,7 +1,7 @@
 /**
- * Deactivates (cancels) business plans whose event start date+time has passed.
- * Uses the same effect as the existing cancel plan API: post_status = 'deleted'.
- * Runs on an interval so that when the start time is reached, the plan is auto-deactivated.
+ * Marks business plans whose event start date+time has passed as completed (not deleted).
+ * Plans stay in the DB so organizers keep analytics, guest lists, and notification post context.
+ * Sets post_status = 'completed', is_live = false (does not set deleted_at).
  */
 
 const { BusinessPlan, Registration } = require('../models');
@@ -33,7 +33,7 @@ function getEventStartDate(date, timeStr) {
 
 /**
  * Find published business plans whose event start (date + time) is in the past
- * and set post_status to 'deleted' (same as cancel plan API).
+ * and set post_status to 'completed'.
  */
 async function deactivatePastEventPlans() {
   try {
@@ -64,7 +64,7 @@ async function deactivatePastEventPlans() {
 
         await BusinessPlan.updateOne(
           { plan_id },
-          { $set: { post_status: 'deleted', deleted_at: new Date() } }
+          { $set: { post_status: 'completed', is_live: false, updated_at: new Date() } }
         );
         deactivated++;
 
@@ -134,7 +134,7 @@ async function deactivatePastEventPlans() {
       }
     }
     if (deactivated > 0) {
-      console.log(`[deactivatePastEventPlans] Deactivated ${deactivated} plan(s) whose event start time had passed.`);
+      console.log(`[deactivatePastEventPlans] Marked ${deactivated} plan(s) completed (event start time had passed).`);
     }
   } catch (err) {
     console.error('[deactivatePastEventPlans] Error:', err.message);

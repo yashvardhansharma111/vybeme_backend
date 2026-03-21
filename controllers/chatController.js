@@ -1,5 +1,6 @@
-const { ChatGroup, ChatMessage, PollMessage, UserBlock } = require('../models');
+const { ChatGroup, ChatMessage, PollMessage, UserBlock, BasePlan } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
+const { postMemberAddedSystemMessage } = require('../services/chatGroupMemberNotifications');
 
 // In-memory typing indicators: group_id -> { user_id -> lastTypingAt }
 const typingByGroup = new Map();
@@ -81,7 +82,12 @@ exports.createGroup = async (req, res) => {
       is_announcement_group: false,
       group_name: group_name || null
     });
-    
+
+    // WhatsApp-style: one system line per person who joined (initial members, not the creator)
+    for (const mid of member_ids.map((id) => String(id))) {
+      await postMemberAddedSystemMessage(group.group_id, mid);
+    }
+
     return sendSuccess(res, 'Chat group created successfully', { group_id: group.group_id }, 201);
   } catch (error) {
     return sendError(res, error.message, 500);
@@ -182,29 +188,21 @@ exports.getGroupDetails = async (req, res) => {
 exports.addMembers = async (req, res) => {
   try {
     const { group_id, member_ids = [] } = req.body;
-    const { User } = require('../models');
     const group = await ChatGroup.findOne({ group_id });
     
     if (!group) {
       return sendError(res, 'Group not found', 404);
     }
     
-    const newMembers = member_ids.filter(id => !group.members.includes(id));
+    if (!group.members) group.members = [];
+    const newMembers = member_ids
+      .map((id) => String(id))
+      .filter((id) => !group.members.some((m) => String(m) === id));
     group.members.push(...newMembers);
     await group.save();
     
     for (const addedUserId of newMembers) {
-      const addedUser = await User.findOne({ user_id: addedUserId }).lean();
-      const addedName = addedUser?.name || 'Someone';
-      const addedImage = addedUser?.profile_image || null;
-      await ChatMessage.create({
-        message_id: generateId('msg'),
-        group_id: group.group_id,
-        user_id: group.created_by || group.members[0],
-        type: 'system',
-        content: { text: `${addedName} was added to the group`, added_user_id: addedUserId, added_user_name: addedName, added_user_profile_image: addedImage },
-        reactions: []
-      });
+      await postMemberAddedSystemMessage(group.group_id, addedUserId);
     }
     
     return sendSuccess(res, 'Members added successfully');
@@ -506,8 +504,11 @@ exports.getMessages = async (req, res) => {
     // Return ascending for UI rendering convenience
     messages = messages.reverse();
 
+    // Never hide "X was added to the group" lines because of block rules (user_id is the added member).
     if (blockedUserIds.size > 0) {
-      messages = messages.filter((m) => !blockedUserIds.has(String(m.user_id)));
+      messages = messages.filter(
+        (m) => m.type === 'system' || !blockedUserIds.has(String(m.user_id))
+      );
     }
     
     // Enrich messages with user info and poll data
@@ -750,7 +751,46 @@ exports.votePoll = async (req, res) => {
     // Update vote count
     option.vote_count += 1;
     await poll.save();
-    
+
+    // Notify event organizer (announcement group poll): leading option % and event title
+    try {
+      const { createGeneralNotification } = require('./notificationController');
+      const pollMsg = await ChatMessage.findOne({ type: 'poll', 'content.poll_id': poll_id }).lean();
+      if (pollMsg?.group_id) {
+        const grp = await ChatGroup.findOne({ group_id: pollMsg.group_id }).lean();
+        if (grp?.plan_id) {
+          const plan = await BasePlan.findOne({ plan_id: grp.plan_id }).select('user_id title').lean();
+          const organizerId = plan?.user_id;
+          if (organizerId && String(organizerId) !== String(user_id)) {
+            const totalVotes = (poll.votes && poll.votes.length) ? poll.votes.length : 0;
+            if (totalVotes > 0 && plan?.title) {
+              let top = poll.options[0];
+              for (const opt of poll.options) {
+                if ((opt.vote_count || 0) > (top.vote_count || 0)) top = opt;
+              }
+              const topCount = top.vote_count || 0;
+              const pct = Math.min(100, Math.round((topCount / totalVotes) * 100));
+              const optText = (top.option_text || 'an option').trim();
+              const eventTitle = plan.title;
+              await createGeneralNotification(organizerId, 'event_chat_poll_vote', {
+                source_plan_id: grp.plan_id,
+                source_user_id: 'system',
+                payload: {
+                  event_title: eventTitle,
+                  cta_type: 'go_to_chat',
+                  group_id: grp.group_id,
+                  poll_id,
+                  notification_text: `${pct}% voted ${optText} for ${eventTitle}`,
+                },
+              });
+            }
+          }
+        }
+      }
+    } catch (notifyErr) {
+      console.error('[votePoll] organizer notification:', notifyErr.message);
+    }
+
     return sendSuccess(res, 'Vote recorded successfully', poll);
   } catch (error) {
     return sendError(res, error.message, 500);
@@ -893,6 +933,24 @@ exports.getChatLists = async (req, res) => {
         user_id: { $ne: user_id }
       });
 
+      const isBusinessPlan = plan.type === 'business';
+
+      // 2-person event chat: show the other member in the list (host sees guest, guest sees host)
+      let other_member_preview = null;
+      if (isBusinessPlan && group.members.length === 2) {
+        const otherMemberId = group.members.find((m) => String(m) !== String(user_id));
+        if (otherMemberId) {
+          const ou = await User.findOne({ user_id: String(otherMemberId) }).lean();
+          if (ou) {
+            other_member_preview = {
+              user_id: ou.user_id,
+              profile_image: ou.profile_image || null,
+              name: ou.name || '',
+            };
+          }
+        }
+      }
+
       const chatItem = {
         group_id: group.group_id,
         plan_id: plan.plan_id,
@@ -914,15 +972,19 @@ exports.getChatLists = async (req, res) => {
           user_id: lastMessage.user_id
         } : null,
         member_count: group.members.length,
-        is_group: group.members.length > 2,
+        // Business event chats are always group threads (even with 2 people) so the app opens group chat UI
+        is_group: isBusinessPlan ? true : group.members.length > 2,
         group_name: group.group_name || (group.members.length === 2 && otherUser ? otherUser.name : plan.title),
         unread_count: unreadCount,
-        is_announcement_group: !!group.is_announcement_group
+        is_announcement_group: !!group.is_announcement_group,
+        ...(other_member_preview ? { other_member_preview } : {}),
       };
       
-      // Check if this is a business plan - business plan groups should always be in "groups" section
-      const isBusinessPlan = plan.type === 'business';
-      // Event groups: hide from chat list until there are at least 2 members (creator + 1 other)
+      // Event chat list visibility:
+      // - Hidden while only the organiser is in the group (1 member — room exists but no guests yet).
+      // - Shown once there are 2+ members (organiser + first registrant, or more) so host and guests can chat.
+      // Note: a strict reading of "not visible unless more than two people" would mean 3+ members and would
+      // block organiser + solo registrant; we intentionally use >= 2 to match "add me + talk to admin" flows.
       if (isBusinessPlan && group.members.length < 2) {
         continue;
       }
@@ -1004,8 +1066,21 @@ exports.getUnreadCounter = async (req, res) => {
       $expr: { $in: [String(user_id), { $map: { input: '$members', as: 'm', in: { $toString: '$$m' } } }] },
       is_closed: false
     }).lean();
+    const planIds = [...new Set(userGroups.map((g) => g.plan_id).filter(Boolean))];
+    const businessPlanIds = new Set(
+      planIds.length
+        ? (await BasePlan.find({ plan_id: { $in: planIds }, type: 'business' }).select('plan_id').lean()).map(
+            (p) => p.plan_id
+          )
+        : []
+    );
     let unread_chats_count = 0;
     for (const group of userGroups) {
+      // Match getChatLists: 1-member business event groups are not listed — don't count toward tab badge.
+      const memberCount = (group.members && group.members.length) || 0;
+      if (businessPlanIds.has(group.plan_id) && memberCount < 2) {
+        continue;
+      }
       const lastReadAt = group.last_read_at && (group.last_read_at[String(user_id)] || group.last_read_at[user_id]);
       const lastReadDate = lastReadAt ? new Date(lastReadAt) : new Date(0);
       const count = await ChatMessage.countDocuments({

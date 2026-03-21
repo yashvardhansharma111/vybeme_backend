@@ -91,6 +91,16 @@ exports.createBusinessPost = async (req, res) => {
     }
     if (!Array.isArray(body.add_details)) body.add_details = [];
 
+    // FormData may send form_id as string; ignore empty / literal "undefined"
+    if (body.form_id !== undefined && body.form_id !== null) {
+      const fid = String(body.form_id).trim();
+      if (fid === '' || fid === 'undefined' || fid === 'null') {
+        delete body.form_id;
+      } else {
+        body.form_id = fid;
+      }
+    }
+
     const planData = {
       plan_id: generateId('plan'),
       ...body,
@@ -136,13 +146,17 @@ exports.createBusinessPost = async (req, res) => {
     
     // Event-specific group: one per plan; group_id stored on plan; all registrants get added; everyone can text
     try {
+      const organiserId = String(plan.user_id || plan.business_id || '').trim();
+      if (!organiserId) {
+        console.warn('⚠️ Skipping event group: plan has no user_id/business_id', plan.plan_id);
+      } else {
       const driveDetail = (plan.add_details || []).find((d) => d.detail_type === 'google_drive_link');
       const driveLinkFromPlan = driveDetail ? ((driveDetail.description || driveDetail.title || '').trim() || null) : null;
       const groupData = {
         group_id: generateId('group'),
         plan_id: plan.plan_id,
-        created_by: plan.user_id,
-        members: [plan.user_id],
+        created_by: organiserId,
+        members: [organiserId],
         is_announcement_group: false,
         group_name: plan.title || `Event: ${plan.plan_id}`,
         ...(driveLinkFromPlan ? { drive_link: driveLinkFromPlan } : {})
@@ -193,6 +207,7 @@ exports.createBusinessPost = async (req, res) => {
       console.log(`   - Plan user_id: ${plan.user_id}`);
       console.log(`   - Group members: [${(group.members || []).join(', ')}]`);
       // No automated message on group creation
+      }
     } catch (groupError) {
       console.error('⚠️ Failed to auto-create group for business plan:', groupError);
       console.error('   Error details:', groupError.message);
@@ -251,6 +266,14 @@ exports.updateBusinessPost = async (req, res) => {
       try { updateData.media = JSON.parse(updateData.media); } catch (_) { updateData.media = []; }
     }
     if (updateData.media !== undefined && !Array.isArray(updateData.media)) updateData.media = [];
+    if (updateData.form_id !== undefined && updateData.form_id !== null) {
+      const fid = String(updateData.form_id).trim();
+      if (fid === '' || fid === 'undefined' || fid === 'null') {
+        updateData.form_id = null;
+      } else {
+        updateData.form_id = fid;
+      }
+    }
 
     const plan = await BusinessPlan.findOne({ plan_id: post_id });
     if (!plan) {

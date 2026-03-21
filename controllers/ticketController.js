@@ -2,6 +2,10 @@ const crypto = require('crypto');
 const config = require('../config');
 const { Ticket, Registration, BusinessPlan, User, ChatGroup, Notification, PaymentOrder } = require('../models');
 const { sendSuccess, sendError, generateId } = require('../utils');
+const {
+  addMemberToChatGroupIfNeeded,
+  postMemberAddedSystemMessage,
+} = require('../services/chatGroupMemberNotifications');
 
 /**
  * Generate unique ticket number (e.g., DEUB2345439)
@@ -189,17 +193,10 @@ exports.registerForEvent = async (req, res) => {
           console.error(`⚠️ Group ${plan.group_id} not found for business plan ${plan_id}`);
         } else {
           console.log(`🔍 Group found: ${group.group_id}, current members: [${(group.members || []).join(', ')}]`);
-          if (!group.members || !group.members.includes(user_id)) {
-            if (!group.members) {
-              group.members = [];
-            }
-            group.members.push(user_id);
-            const savedGroup = await group.save();
-            // No automated "Hi" message when user joins event chat
-
+          const { added } = await addMemberToChatGroupIfNeeded(group, user_id);
+          if (added) {
             const verifyGroup = await ChatGroup.findOne({ group_id: plan.group_id }).lean();
             console.log(`✅ Added user ${user_id} to group ${plan.group_id} for business plan ${plan_id}`);
-            console.log(`   - Group now has ${savedGroup.members.length} members: [${savedGroup.members.join(', ')}]`);
             console.log(`   - Verified in DB: members=[${(verifyGroup?.members || []).join(', ')}]`);
           } else {
             console.log(`ℹ️ User ${user_id} is already a member of group ${plan.group_id}`);
@@ -231,14 +228,8 @@ exports.registerForEvent = async (req, res) => {
           { $set: { group_id: newGroup.group_id } }
         );
         plan.group_id = newGroup.group_id;
-        // No automated welcome or "Hi" message when group is created
+        await postMemberAddedSystemMessage(newGroup.group_id, user_id);
 
-        const { BasePlan } = require('../models');
-        await BasePlan.updateOne(
-          { plan_id: plan.plan_id },
-          { $inc: { chat_message_count: 1 } }
-        );
-        
         console.log(`✅ Created missing group ${newGroup.group_id} for business plan ${plan_id}`);
         console.log(`   - Added user ${user_id} to the new group`);
       } catch (fallbackError) {
@@ -1162,11 +1153,8 @@ exports.verifyPayment = async (req, res) => {
     if (plan.group_id) {
       try {
         const group = await ChatGroup.findOne({ group_id: plan.group_id });
-        if (group && (!group.members || !group.members.includes(user_id))) {
-          if (!group.members) group.members = [];
-          group.members.push(user_id);
-          await group.save();
-          // No automated "Hi" message when user joins event chat
+        if (group) {
+          await addMemberToChatGroupIfNeeded(group, user_id);
         }
       } catch (e) {
         console.error('Failed to add user to group:', e);
