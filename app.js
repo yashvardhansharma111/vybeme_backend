@@ -47,7 +47,8 @@ const corsOptions = {
       'http://localhost:19006',
       'http://localhost:3000',
       'https://vybeme.app',
-      'https://app.vybeme.in', // Web app (shared post links open here)
+      'https://app.weknd.in', // Web app (shared post links, checkout WebView)
+      'https://app.vybeme.in', // Legacy domain during cutover
     ];
     
     if (allowedOrigins.indexOf(origin) !== -1 || origin.includes('ngrok')) {
