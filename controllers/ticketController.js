@@ -435,6 +435,7 @@ exports.getUserTicket = async (req, res) => {
     return sendSuccess(res, 'Ticket retrieved successfully', {
       ticket: {
         ...ticket.toObject(),
+        checkin_code: registration.checkin_code || null,
         plan: plan ? {
           plan_id: plan.plan_id,
           title: plan.title,
