@@ -578,9 +578,12 @@ exports.getMessages = async (req, res) => {
               title: plan.title,
               description: plan.description,
               media: plan.media || [],
-              // BasePlan doesn't store an explicit `is_business` boolean, but the plan discriminator does.
-              // BusinessPlan discriminator sets `type: 'business'` (see BusinessPlan.js schema).
-              is_business: plan.type === 'business',
+              // BasePlan doesn't store an explicit `is_business` boolean, but the discriminator does.
+              // Depending on how the plan document was created, either `plan_type` (discriminatorKey)
+              // or the discriminator schema field `type` may be present.
+              is_business:
+                String(plan.plan_type || '').toLowerCase() === 'businessplan' ||
+                String(plan.type || '').toLowerCase() === 'business',
               // Tag inputs consumed by `SharedPlanCard` for matching home UI.
               category_main: plan.category_main || '',
               category_sub: Array.isArray(plan.category_sub) ? plan.category_sub : [],
