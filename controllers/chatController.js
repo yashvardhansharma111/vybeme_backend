@@ -577,7 +577,27 @@ exports.getMessages = async (req, res) => {
               plan_id: plan.plan_id,
               title: plan.title,
               description: plan.description,
-              media: plan.media || []
+              media: plan.media || [],
+              // BasePlan doesn't store an explicit `is_business` boolean, but the discriminator does.
+              // Depending on how the plan document was created, either `plan_type` (discriminatorKey)
+              // or the discriminator schema field `type` may be present.
+              is_business:
+                String(plan.plan_type || '').toLowerCase() === 'businessplan' ||
+                String(plan.type || '').toLowerCase() === 'business',
+              // Tag inputs consumed by `SharedPlanCard` for matching home UI.
+              category_main: plan.category_main || '',
+              category_sub: Array.isArray(plan.category_sub) ? plan.category_sub : [],
+              temporal_tags: Array.isArray(plan.temporal_tags) ? plan.temporal_tags : [],
+              // Regular + business tag pills rely on these.
+              date: plan.date ?? null,
+              time: plan.time ?? null,
+              // Used by BusinessCard-style “additional” pills (distance, f&b, dress code, music type).
+              add_details: Array.isArray(plan.add_details) ? plan.add_details : [],
+              // Fallback for simplified tag derivation inside the UI.
+              tags: [
+                ...(Array.isArray(plan.temporal_tags) ? plan.temporal_tags : []),
+                ...(Array.isArray(plan.category_sub) ? plan.category_sub : []),
+              ],
             };
           }
         }

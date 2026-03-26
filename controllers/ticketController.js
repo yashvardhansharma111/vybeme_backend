@@ -8,12 +8,43 @@ const {
 } = require('../services/chatGroupMemberNotifications');
 
 /**
- * Generate unique ticket number (e.g., DEUB2345439)
+ * Generate human-readable ticket number: OwnerFirstName01, OwnerFirstName02, …
+ * Uses the plan's ticket_sequence (atomic update) to guarantee per-event sequencing.
  */
-function generateTicketNumber() {
-  const prefix = 'DEUB'; // Can be customized per business/event
-  const randomNum = Math.floor(Math.random() * 10000000).toString().padStart(10, '0');
-  return `${prefix}${randomNum}`;
+async function generateTicketNumber(plan) {
+  const ownerId = plan.user_id || plan.business_id;
+  let firstName = 'GUEST';
+  if (ownerId) {
+    const owner = await User.findOne({ user_id: ownerId }).select('name').lean();
+    if (owner && owner.name) {
+      const letters = owner.name.trim().split(/\s+/)[0].replace(/[^a-zA-Z]/g, '');
+      if (letters) firstName = letters;
+    }
+  }
+  const prefix = firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
+
+  const planId = plan.plan_id;
+  // Backfill-safe seed: if ticket_sequence is missing, start from existing ticket count.
+  const existingTickets = await Ticket.countDocuments({ plan_id: planId });
+  const updated = await BusinessPlan.findOneAndUpdate(
+    { plan_id: planId },
+    [
+      {
+        $set: {
+          ticket_sequence: {
+            $add: [{ $ifNull: ['$ticket_sequence', existingTickets] }, 1],
+          },
+        },
+      },
+    ],
+    { new: true }
+  );
+  if (!updated || updated.ticket_sequence == null) {
+    throw new Error('Failed to allocate ticket sequence for plan');
+  }
+  const seq = updated.ticket_sequence;
+  const seqStr = seq < 100 ? String(seq).padStart(2, '0') : String(seq);
+  return `${prefix}${seqStr}`;
 }
 
 /**
@@ -172,7 +203,7 @@ exports.registerForEvent = async (req, res) => {
 
     // Generate ticket
     const ticketId = generateId('ticket');
-    const ticketNumber = generateTicketNumber();
+    const ticketNumber = await generateTicketNumber(plan);
     const { qrData, qrHash } = generateQRCodeData(ticketId, plan_id, user_id);
     
     // Create ticket
@@ -751,7 +782,19 @@ exports.getGuestList = async (req, res) => {
       return sendError(res, 'Event not found', 404);
     }
 
+    const requestingUserId = req.user?.user_id || req.query?.user_id;
     const owner_id = plan.user_id || plan.business_id;
+    const isOwner = requestingUserId && (
+      String(requestingUserId) === String(plan.user_id) ||
+      String(requestingUserId) === String(plan.business_id)
+    );
+
+    if (!plan.allow_view_guest_list && !isOwner) {
+      return sendSuccess(res, 'Guest list is hidden for this event', {
+        guests: [],
+        total: 0,
+      });
+    }
     const registrations = await Registration.find({
       plan_id,
       status: { $in: REGISTERED_STATUSES },
@@ -818,40 +861,51 @@ exports.getAttendeeList = async (req, res) => {
     const registrations = await Registration.find({ plan_id })
       .sort({ created_at: -1 })
       .lean();
-    
-    // Get ticket and user details for each registration
-    const attendeeList = await Promise.all(
-      registrations.map(async (reg) => {
-        const ticket = reg.ticket_id 
-          ? await Ticket.findOne({ ticket_id: reg.ticket_id }).lean()
-          : null;
-        
-        const user = await User.findOne({ user_id: reg.user_id }).lean();
-        
-        return {
-          registration_id: reg.registration_id,
-          user_id: reg.user_id,
-          user: user ? {
-            user_id: user.user_id,
-            name: user.name,
-            profile_image: user.profile_image
-          } : null,
-          ticket_id: reg.ticket_id,
-          ticket_number: ticket?.ticket_number || null,
-          checkin_code: reg.checkin_code || null,
-          status: reg.status,
-          checked_in: reg.checked_in || ticket?.checked_in || false,
-          checked_in_at: reg.checked_in_at || ticket?.checked_in_at || null,
-          checked_in_via: reg.checked_in_via || null,
-          price_paid: reg.price_paid,
-          created_at: reg.created_at,
-          age_range: reg.age_range || null,
-          gender: reg.gender || user?.gender || null,
-          running_experience: reg.running_experience || null,
-          what_brings_you: reg.what_brings_you || null
-        };
-      })
-    );
+
+    // Bulk-fetch users and tickets to avoid N+1 queries
+    const userIds = [...new Set(registrations.map(r => r.user_id).filter(Boolean))];
+    const ticketIds = [...new Set(registrations.map(r => r.ticket_id).filter(Boolean))];
+
+    const [users, tickets] = await Promise.all([
+      userIds.length > 0
+        ? User.find({ user_id: { $in: userIds } }).select('user_id name profile_image phone_number gender').lean()
+        : Promise.resolve([]),
+      ticketIds.length > 0
+        ? Ticket.find({ ticket_id: { $in: ticketIds } }).select('ticket_id ticket_number checked_in checked_in_at').lean()
+        : Promise.resolve([]),
+    ]);
+
+    const userMap = new Map(users.map(u => [u.user_id, u]));
+    const ticketMap = new Map(tickets.map(t => [t.ticket_id, t]));
+
+    const attendeeList = registrations.map((reg) => {
+      const user = userMap.get(reg.user_id) || null;
+      const ticket = reg.ticket_id ? ticketMap.get(reg.ticket_id) || null : null;
+      return {
+        registration_id: reg.registration_id,
+        user_id: reg.user_id,
+        user: user ? {
+          user_id: user.user_id,
+          name: user.name,
+          profile_image: user.profile_image,
+          phone_number: user.phone_number || null
+        } : null,
+        phone_number: user?.phone_number || null,
+        ticket_id: reg.ticket_id,
+        ticket_number: ticket?.ticket_number || null,
+        checkin_code: reg.checkin_code || null,
+        status: reg.status,
+        checked_in: reg.checked_in || ticket?.checked_in || false,
+        checked_in_at: reg.checked_in_at || ticket?.checked_in_at || null,
+        checked_in_via: reg.checked_in_via || null,
+        price_paid: reg.price_paid,
+        created_at: reg.created_at,
+        age_range: reg.age_range || null,
+        gender: reg.gender || user?.gender || null,
+        running_experience: reg.running_experience || null,
+        what_brings_you: reg.what_brings_you || null
+      };
+    });
     
     // Get check-in statistics
     const totalRegistrations = registrations.length;
@@ -1148,7 +1202,7 @@ exports.verifyPayment = async (req, res) => {
 
     const pricePaid = amount_paise / 100;
     const ticketId = generateId('ticket');
-    const ticketNumber = generateTicketNumber();
+    const ticketNumber = await generateTicketNumber(plan);
     const { qrData, qrHash } = generateQRCodeData(ticketId, plan_id, user_id);
 
     const ticket = await Ticket.create({
