@@ -150,6 +150,11 @@ const businessPlanSchema = new mongoose.Schema({
   // Monotonic sequence for human check-in codes (PREFIX 01, 02, …). Updated atomically to avoid duplicate codes under concurrent registrations.
   checkin_sequence: {
     type: Number
+  },
+  // Monotonic sequence for ticket_number (FirstName01, FirstName02, ...), scoped per event.
+  // Updated atomically to avoid duplicates/races when multiple users register together.
+  ticket_sequence: {
+    type: Number
   }
 });
 

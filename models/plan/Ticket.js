@@ -33,7 +33,7 @@ const ticketSchema = new mongoose.Schema({
   ticket_number: {
     type: String,
     required: true,
-    unique: true // Human-readable ticket number like "DEUB2345439"
+    // Must NOT be globally unique because numbering resets per event (e.g. Yash01 for each new event).
   },
   status: {
     type: String,
@@ -69,5 +69,7 @@ const ticketSchema = new mongoose.Schema({
 });
 
 ticketSchema.index({ plan_id: 1, user_id: 1 });
+// Ticket numbers are sequential per plan (event), so enforce uniqueness per plan.
+ticketSchema.index({ plan_id: 1, ticket_number: 1 }, { unique: true });
 
 module.exports = mongoose.model('Ticket', ticketSchema);

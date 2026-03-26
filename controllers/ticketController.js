@@ -9,7 +9,7 @@ const {
 
 /**
  * Generate human-readable ticket number: OwnerFirstName01, OwnerFirstName02, …
- * Uses the plan's checkin_sequence (atomic $inc) to guarantee uniqueness.
+ * Uses the plan's ticket_sequence (atomic update) to guarantee per-event sequencing.
  */
 async function generateTicketNumber(plan) {
   const ownerId = plan.user_id || plan.business_id;
@@ -23,8 +23,26 @@ async function generateTicketNumber(plan) {
   }
   const prefix = firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
 
-  const existingTickets = await Ticket.countDocuments({ plan_id: plan.plan_id });
-  const seq = existingTickets + 1;
+  const planId = plan.plan_id;
+  // Backfill-safe seed: if ticket_sequence is missing, start from existing ticket count.
+  const existingTickets = await Ticket.countDocuments({ plan_id: planId });
+  const updated = await BusinessPlan.findOneAndUpdate(
+    { plan_id: planId },
+    [
+      {
+        $set: {
+          ticket_sequence: {
+            $add: [{ $ifNull: ['$ticket_sequence', existingTickets] }, 1],
+          },
+        },
+      },
+    ],
+    { new: true }
+  );
+  if (!updated || updated.ticket_sequence == null) {
+    throw new Error('Failed to allocate ticket sequence for plan');
+  }
+  const seq = updated.ticket_sequence;
   const seqStr = seq < 100 ? String(seq).padStart(2, '0') : String(seq);
   return `${prefix}${seqStr}`;
 }

@@ -6,17 +6,19 @@ const { sendSuccess, sendError, generateId } = require('../utils');
  */
 exports.createForm = async (req, res) => {
   try {
-    const { user_id, name, description = '', fields = [], plan_id = null } = req.body;
+    const { user_id, name, title, description = '', fields = [], plan_id = null } = req.body;
+    const resolvedTitle = String(title || name || '').trim();
 
-    if (!user_id || !name) {
-      return sendError(res, 'user_id and name are required', 400);
+    if (!user_id || !resolvedTitle) {
+      return sendError(res, 'user_id and title (or name) are required', 400);
     }
 
     const form = await Form.create({
       form_id: generateId('form'),
       user_id,
       plan_id,
-      name,
+      name: resolvedTitle,
+      title: resolvedTitle,
       description,
       fields: fields.map((f, i) => ({
         ...f,
@@ -70,14 +72,18 @@ exports.getUserForms = async (req, res) => {
 exports.updateForm = async (req, res) => {
   try {
     const { formId } = req.params;
-    const { name, description, fields } = req.body;
+    const { name, title, description, fields } = req.body;
 
     const form = await Form.findOne({ form_id: formId });
     if (!form) {
       return sendError(res, 'Form not found', 404);
     }
 
-    if (name) form.name = name;
+    const resolvedTitle = String(title || name || '').trim();
+    if (resolvedTitle) {
+      form.name = resolvedTitle;
+      form.title = resolvedTitle;
+    }
     if (description !== undefined) form.description = description;
     if (fields) {
       form.fields = fields.map((f, i) => ({

@@ -53,6 +53,10 @@ const formSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  title: {
+    type: String,
+    default: ''
+  },
   description: {
     type: String,
     default: ''
@@ -76,6 +80,16 @@ const formSchema = new mongoose.Schema({
 });
 
 formSchema.pre('save', function(next) {
+  const normalizedTitle = String(this.title || '').trim();
+  const normalizedName = String(this.name || '').trim();
+  if (!normalizedTitle && normalizedName) {
+    this.title = normalizedName;
+  } else if (normalizedTitle && !normalizedName) {
+    this.name = normalizedTitle;
+  } else if (normalizedTitle && normalizedName && normalizedTitle !== normalizedName) {
+    // Keep old clients (name) and new clients (title) in sync.
+    this.name = normalizedTitle;
+  }
   if (this.isModified() || this.isNew) {
     this.updated_at = Date.now();
   }
