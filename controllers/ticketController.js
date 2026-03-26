@@ -751,15 +751,6 @@ exports.getGuestList = async (req, res) => {
       return sendError(res, 'Event not found', 404);
     }
 
-    // Check if guest list viewing is disabled
-    if (!plan.allow_view_guest_list) {
-      return sendSuccess(res, 'Guest list is disabled by the host', {
-        guests: [],
-        total: 0,
-        guest_list_disabled: true
-      });
-    }
-
     const owner_id = plan.user_id || plan.business_id;
     const registrations = await Registration.find({
       plan_id,
