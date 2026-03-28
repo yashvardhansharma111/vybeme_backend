@@ -111,7 +111,12 @@ exports.getNotifications = async (req, res) => {
             description: post.description,
             media: post.media || [],
             category_main: post.category_main || null,
-            category_sub: post.category_sub || []
+            category_sub: post.category_sub || [],
+            // Needed for exports / UI (same fields as BasePlan)
+            date: post.date != null ? post.date : null,
+            time: post.time != null ? post.time : null,
+            end_time: post.end_time != null ? post.end_time : null,
+            location_text: post.location_text != null ? post.location_text : ''
           };
         }
       }
