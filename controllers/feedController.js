@@ -51,9 +51,10 @@ exports.getHomeFeed = async (req, res) => {
 
     // Get posts (we'll rank them, so fetch more than needed).
     // Important: include offset in fetch size so pagination returns different items.
-    const safeLimit = Math.min(50, Math.max(1, parseInt(limit)));
-    const safeOffset = Math.max(0, parseInt(offset));
-    const fetchSize = Math.min(250, (safeOffset + safeLimit) * 5);
+    const safeLimit = Math.min(100, Math.max(1, parseInt(limit, 10) || 10));
+    const safeOffset = Math.max(0, parseInt(offset, 10) || 0);
+    // Pull enough candidates from DB before ranking so the feed isn't starved when many plans exist.
+    const fetchSize = Math.min(2000, Math.max(400, (safeOffset + safeLimit) * 12));
     const plans = await BasePlan.find(query)
       .sort({ created_at: -1 })
       .limit(fetchSize)
