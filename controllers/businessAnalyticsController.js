@@ -22,63 +22,26 @@ function bucketGender(raw) {
   return 'other';
 }
 
-/** Event instant for comparison (stored as date or ISO string; some docs use loose fields). */
-function getPlanEventTimeMs(plan) {
-  const raw = plan.date ?? plan.start_date ?? null;
-  if (raw == null) return null;
-  const t = new Date(raw);
-  return Number.isNaN(t.getTime()) ? null : t.getTime();
-}
-
-/** When the plan was cancelled/deleted (prefer deleted_at set on cancel). */
-function getPlanCancelTimeMs(plan) {
-  if (plan.deleted_at != null) {
-    const t = new Date(plan.deleted_at);
-    if (!Number.isNaN(t.getTime())) return t.getTime();
-  }
-  const st = String(plan.post_status || '').toLowerCase();
-  if (st !== 'deleted' && st !== 'cancelled') return null;
-  if (plan.updated_at != null) {
-    const t = new Date(plan.updated_at);
-    if (!Number.isNaN(t.getTime())) return t.getTime();
-  }
-  return null;
-}
-
-/**
- * Deleted/cancelled before the scheduled event instant — ticket revenue must not count in org totals.
- * Plans with no event date but deleted: exclude (cannot show the event ran).
- */
-function isEarlyCancelledExcludeRevenue(plan) {
+/** Cancelled / removed listing — do not count its ticket revenue in org totals (no date logic). */
+function isCancelledPlanExcludeRevenue(plan) {
   if (!plan || !plan.plan_id) return false;
   const st = String(plan.post_status || '').toLowerCase();
-  if (st !== 'deleted' && st !== 'cancelled') return false;
-
-  const eventMs = getPlanEventTimeMs(plan);
-  const cancelMs = getPlanCancelTimeMs(plan);
-
-  if (eventMs == null) {
-    return true;
-  }
-  if (cancelMs == null) {
-    return true;
-  }
-  return cancelMs < eventMs;
+  return st === 'deleted' || st === 'cancelled';
 }
 
-/** Lifetime sum of price_paid for all owner plans, excluding early-cancelled events. */
+/** Lifetime sum of price_paid for all owner plans, excluding cancelled plans. */
 async function computeLifetimeRevenueForOwner(callerId) {
   const allPlans = await BusinessPlan.find({
     $or: [{ user_id: callerId }, { business_id: callerId }],
   })
-    .select('plan_id date start_date post_status deleted_at updated_at')
+    .select('plan_id post_status')
     .lean();
 
   if (allPlans.length === 0) return 0;
 
   const exclude = new Set();
   for (const p of allPlans) {
-    if (isEarlyCancelledExcludeRevenue(p)) exclude.add(p.plan_id);
+    if (isCancelledPlanExcludeRevenue(p)) exclude.add(p.plan_id);
   }
 
   const planIds = allPlans.map((p) => p.plan_id);
@@ -330,7 +293,7 @@ exports.getOverallAnalytics = async (req, res) => {
       .lean();
 
     const plan_ids = plans.map((p) => p.plan_id);
-    // Top-card "Revenue Generated": lifetime total for all plans, excluding events cancelled before their date.
+    // Top-card "Revenue Generated": lifetime total for all plans, excluding cancelled/deleted plans.
     const revenueLifetime = await computeLifetimeRevenueForOwner(caller_id);
 
     if (plan_ids.length === 0) {
