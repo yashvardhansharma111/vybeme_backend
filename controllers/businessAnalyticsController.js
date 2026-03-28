@@ -22,21 +22,48 @@ function bucketGender(raw) {
   return 'other';
 }
 
+/** Event instant for comparison (stored as date or ISO string; some docs use loose fields). */
+function getPlanEventTimeMs(plan) {
+  const raw = plan.date ?? plan.start_date ?? null;
+  if (raw == null) return null;
+  const t = new Date(raw);
+  return Number.isNaN(t.getTime()) ? null : t.getTime();
+}
+
+/** When the plan was cancelled/deleted (prefer deleted_at set on cancel). */
+function getPlanCancelTimeMs(plan) {
+  if (plan.deleted_at != null) {
+    const t = new Date(plan.deleted_at);
+    if (!Number.isNaN(t.getTime())) return t.getTime();
+  }
+  const st = String(plan.post_status || '').toLowerCase();
+  if (st !== 'deleted' && st !== 'cancelled') return null;
+  if (plan.updated_at != null) {
+    const t = new Date(plan.updated_at);
+    if (!Number.isNaN(t.getTime())) return t.getTime();
+  }
+  return null;
+}
+
 /**
- * Deleted/cancelled before the scheduled event date — ticket revenue must not count in org totals.
+ * Deleted/cancelled before the scheduled event instant — ticket revenue must not count in org totals.
+ * Plans with no event date but deleted: exclude (cannot show the event ran).
  */
 function isEarlyCancelledExcludeRevenue(plan) {
   if (!plan || !plan.plan_id) return false;
   const st = String(plan.post_status || '').toLowerCase();
   if (st !== 'deleted' && st !== 'cancelled') return false;
-  if (!plan.date) return false;
-  const eventDate = new Date(plan.date);
-  if (Number.isNaN(eventDate.getTime())) return false;
-  const cancelAt = plan.deleted_at || plan.updated_at;
-  if (!cancelAt) return false;
-  const t = new Date(cancelAt);
-  if (Number.isNaN(t.getTime())) return false;
-  return t < eventDate;
+
+  const eventMs = getPlanEventTimeMs(plan);
+  const cancelMs = getPlanCancelTimeMs(plan);
+
+  if (eventMs == null) {
+    return true;
+  }
+  if (cancelMs == null) {
+    return true;
+  }
+  return cancelMs < eventMs;
 }
 
 /** Lifetime sum of price_paid for all owner plans, excluding early-cancelled events. */
@@ -44,7 +71,7 @@ async function computeLifetimeRevenueForOwner(callerId) {
   const allPlans = await BusinessPlan.find({
     $or: [{ user_id: callerId }, { business_id: callerId }],
   })
-    .select('plan_id date post_status deleted_at updated_at')
+    .select('plan_id date start_date post_status deleted_at updated_at')
     .lean();
 
   if (allPlans.length === 0) return 0;

@@ -418,6 +418,16 @@ exports.updateBusinessPost = async (req, res) => {
       updateData.ticket_image = req.body.ticket_image;
     }
 
+    // updateOne does not run schema pre('save'); bump updated_at and record cancel time for analytics
+    updateData.updated_at = new Date();
+    const prevStatus = String(plan.post_status || '');
+    const nextStatus = updateData.post_status !== undefined ? String(updateData.post_status) : prevStatus;
+    if (nextStatus === 'deleted' && prevStatus !== 'deleted') {
+      if (updateData.deleted_at == null && req.body.deleted_at == null) {
+        updateData.deleted_at = new Date();
+      }
+    }
+
     delete updateData.files;
 
     const wasDeleted = updateData.post_status === 'deleted';
