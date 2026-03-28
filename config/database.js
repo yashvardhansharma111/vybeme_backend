@@ -9,6 +9,18 @@ const connectDB = async () => {
     });
 
     console.log(`MongoDB Connected: ${conn.connection.host}`);
+
+    // Ticket numbers repeat across events (e.g. Akshat01 per event) but are unique per plan.
+    // Older DBs may still have a global unique index `ticket_number_1`, which causes E11000
+    // when the same human-readable number appears on another event. syncIndexes() drops
+    // indexes not defined on the schema and ensures { plan_id, ticket_number } unique.
+    try {
+      const Ticket = require('../models/plan/Ticket');
+      await Ticket.syncIndexes();
+    } catch (idxErr) {
+      console.warn('[MongoDB] Ticket index sync (non-fatal):', idxErr?.message || idxErr);
+    }
+
     return conn;
   } catch (error) {
     console.error('Error connecting to MongoDB:', error.message);
