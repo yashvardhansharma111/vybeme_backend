@@ -1,6 +1,14 @@
-const { BasePlan, RegularPlan, BusinessPlan, Repost, User, UserBlock, PlanInteraction } = require('../models');
-const { sendSuccess, sendError, paginate } = require('../utils');
-const { rankPlansForUser, rankPlansForGuest } = require('../utils/ranking');
+const {
+  BasePlan,
+  RegularPlan,
+  BusinessPlan,
+  Repost,
+  User,
+  UserBlock,
+  PlanInteraction,
+} = require("../models");
+const { sendSuccess, sendError, paginate } = require("../utils");
+const { rankPlansForUser, rankPlansForGuest } = require("../utils/ranking");
 
 /**
  * Get home feed with personalized ranking algorithm
@@ -10,33 +18,37 @@ exports.getHomeFeed = async (req, res) => {
     const { user_id, filters = {}, pagination = {} } = req.body;
     const { limit = 10, offset = 0 } = pagination;
     const { category_main, category_sub = [], location } = filters;
-    
+
     const query = {
-      post_status: { $in: ['published', 'completed'] },
+      post_status: { $in: ["published", "completed"] },
       is_draft: false,
-      deleted_at: null
+      deleted_at: null,
     };
-    
+
     // Category filter: only show posts whose MAIN category matches the selected tag (prefix, case-insensitive).
     // e.g. "fitness" matches "fitness" and "fitness/training"; "running" matches only "running". No category_sub
     // matching so a Running post with a Fitness sub-tag does not appear under Fitness.
-    if (category_main && typeof category_main === 'string' && category_main.trim()) {
+    if (
+      category_main &&
+      typeof category_main === "string" &&
+      category_main.trim()
+    ) {
       const main = category_main.trim();
-      const escaped = main.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const mainRegex = new RegExp(`^${escaped}`, 'i');
+      const escaped = main.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const mainRegex = new RegExp(`^${escaped}`, "i");
       query.category_main = mainRegex;
     }
-    
+
     if (category_sub.length > 0) {
       query.category_sub = { $in: category_sub };
     }
-    
+
     if (location && location.lat && location.long) {
       // For location-based filtering, you'd use geospatial queries
       // For now, we'll just filter if location_coordinates exist
       query.location_coordinates = { $exists: true };
     }
-    
+
     // Get posts (we'll rank them, so fetch more than needed).
     // Important: include offset in fetch size so pagination returns different items.
     const safeLimit = Math.min(50, Math.max(1, parseInt(limit)));
@@ -46,7 +58,7 @@ exports.getHomeFeed = async (req, res) => {
       .sort({ created_at: -1 })
       .limit(fetchSize)
       .lean();
-    
+
     // Fetch user data if user_id is provided (for registered users)
     let user = null;
     if (user_id) {
@@ -57,18 +69,22 @@ exports.getHomeFeed = async (req, res) => {
     let blockedUserIds = new Set();
     if (user_id) {
       const blocks = await UserBlock.find({
-        $or: [{ blocker_id: user_id }, { blocked_user_id: user_id }]
+        $or: [{ blocker_id: user_id }, { blocked_user_id: user_id }],
       }).lean();
       blocks.forEach((b) => {
-        if (String(b.blocker_id) === String(user_id)) blockedUserIds.add(String(b.blocked_user_id));
-        if (String(b.blocked_user_id) === String(user_id)) blockedUserIds.add(String(b.blocker_id));
+        if (String(b.blocker_id) === String(user_id))
+          blockedUserIds.add(String(b.blocked_user_id));
+        if (String(b.blocked_user_id) === String(user_id))
+          blockedUserIds.add(String(b.blocker_id));
       });
     }
 
     // Women-only posts are visible to everyone; only registration is restricted to women
     let plansFiltered = plans;
     if (blockedUserIds.size > 0) {
-      plansFiltered = plansFiltered.filter((p) => !blockedUserIds.has(String(p.user_id)));
+      plansFiltered = plansFiltered.filter(
+        (p) => !blockedUserIds.has(String(p.user_id)),
+      );
     }
 
     // Apply ranking algorithm
@@ -78,31 +94,35 @@ exports.getHomeFeed = async (req, res) => {
     } else {
       rankedPlans = rankPlansForGuest(plansFiltered);
     }
-    
+
     // Check which posts are reposts
-    const planIds = rankedPlans.map(p => p.plan_id);
+    const planIds = rankedPlans.map((p) => p.plan_id);
     const reposts = await Repost.find({ original_plan_id: { $in: planIds } });
     const repostMap = {};
-    reposts.forEach(r => { repostMap[r.original_plan_id] = r; });
-    
+    reposts.forEach((r) => {
+      repostMap[r.original_plan_id] = r;
+    });
+
     // Get reposts as separate feed items (also need to rank them)
     const allReposts = await Repost.find({})
       .sort({ created_at: -1 })
       .limit(Math.min(200, safeLimit * 2 + safeOffset))
       .lean();
-    
+
     // Get original plans for reposts
-    const repostPlanIds = allReposts.map(r => r.original_plan_id);
-    const originalPlans = await BasePlan.find({ 
+    const repostPlanIds = allReposts.map((r) => r.original_plan_id);
+    const originalPlans = await BasePlan.find({
       plan_id: { $in: repostPlanIds },
-      deleted_at: null
+      deleted_at: null,
     }).lean();
     const originalPlansMap = {};
-    originalPlans.forEach(p => { originalPlansMap[p.plan_id] = p; });
-    
+    originalPlans.forEach((p) => {
+      originalPlansMap[p.plan_id] = p;
+    });
+
     // Rank reposts (using original plan data)
     const repostPlans = allReposts
-      .map(repost => {
+      .map((repost) => {
         const originalPlan = originalPlansMap[repost.original_plan_id];
         if (!originalPlan) return null;
         if (blockedUserIds.size > 0) {
@@ -113,7 +133,7 @@ exports.getHomeFeed = async (req, res) => {
           ...originalPlan,
           created_at: repost.created_at,
           _isRepost: true,
-          _repostData: repost
+          _repostData: repost,
         };
       })
       .filter(Boolean);
@@ -126,11 +146,11 @@ exports.getHomeFeed = async (req, res) => {
         rankedReposts = rankPlansForGuest(repostPlans);
       }
     }
-    
+
     // Format regular posts (mark if they're reposted)
     const regularFeed = rankedPlans
       .slice(safeOffset, safeOffset + safeLimit)
-      .map(plan => {
+      .map((plan) => {
         const isReposted = !!repostMap[plan.plan_id];
         const item = {
           post_id: plan.plan_id,
@@ -141,7 +161,7 @@ exports.getHomeFeed = async (req, res) => {
           tags: plan.category_sub,
           category_sub: plan.category_sub || [],
           temporal_tags: plan.temporal_tags || [],
-          category_main: plan.category_main || '',
+          category_main: plan.category_main || "",
           timestamp: plan.created_at,
           location: plan.location_coordinates || plan.location_text,
           is_active: plan.is_live,
@@ -149,25 +169,26 @@ exports.getHomeFeed = async (req, res) => {
           joins_count: plan.joins_count ?? 0,
           is_repost: false,
           cannot_be_reposted: isReposted,
-          type: plan.type || 'regular',
+          type: plan.type || "regular",
           _rankingScore: plan._rankingScore,
           is_women_only: !!plan.is_women_only,
         };
-        if (plan.type === 'business') {
+        if (plan.type === "business") {
           item.ticket_image = plan.ticket_image || null;
           item.passes = plan.passes || [];
           item.location_text = plan.location_text;
           item.date = plan.date;
           item.time = plan.time;
           item.add_details = plan.add_details || [];
+          item.allow_view_guest_list = plan.allow_view_guest_list !== false;
         }
         return item;
       });
-    
+
     // Format reposts as separate feed items
     const repostFeed = rankedReposts
       .slice(0, Math.floor(safeLimit * 0.3)) // 30% of feed can be reposts
-      .map(plan => {
+      .map((plan) => {
         const repost = plan._repostData;
         const item = {
           post_id: repost.repost_id,
@@ -178,14 +199,14 @@ exports.getHomeFeed = async (req, res) => {
           tags: plan.category_sub,
           category_sub: plan.category_sub || [],
           temporal_tags: plan.temporal_tags || [],
-          category_main: plan.category_main || '',
+          category_main: plan.category_main || "",
           timestamp: repost.created_at,
           location: plan.location_coordinates || plan.location_text,
           is_active: plan.is_live,
           interaction_count: plan.interaction_count,
           joins_count: plan.joins_count ?? 0,
           is_repost: true,
-          type: plan.type || 'regular',
+          type: plan.type || "regular",
           is_women_only: !!plan.is_women_only,
           repost_data: {
             repost_id: repost.repost_id,
@@ -194,21 +215,22 @@ exports.getHomeFeed = async (req, res) => {
             repost_description: repost.repost_description,
             original_plan_id: repost.original_plan_id,
             original_author_id: plan.user_id,
-            cannot_be_reposted: repost.cannot_be_reposted
+            cannot_be_reposted: repost.cannot_be_reposted,
           },
-          _rankingScore: plan._rankingScore
+          _rankingScore: plan._rankingScore,
         };
-        if (plan.type === 'business') {
+        if (plan.type === "business") {
           item.ticket_image = plan.ticket_image || null;
           item.passes = plan.passes || [];
           item.location_text = plan.location_text;
           item.date = plan.date;
           item.time = plan.time;
           item.add_details = plan.add_details || [];
+          item.allow_view_guest_list = plan.allow_view_guest_list !== false;
         }
         return item;
       });
-    
+
     // Combine regular feed and reposts, maintaining ranking order
     // Interleave reposts into regular feed based on ranking scores
     const combinedFeed = [...regularFeed, ...repostFeed];
@@ -219,9 +241,9 @@ exports.getHomeFeed = async (req, res) => {
       }
       return new Date(b.timestamp) - new Date(a.timestamp);
     });
-    
+
     // Remove ranking scores from final output (optional, for cleaner API response)
-    let finalFeed = combinedFeed.slice(0, safeLimit).map(item => {
+    let finalFeed = combinedFeed.slice(0, safeLimit).map((item) => {
       const { _rankingScore, ...rest } = item;
       return rest;
     });
@@ -238,10 +260,10 @@ exports.getHomeFeed = async (req, res) => {
     if (planIdsForPreview.length > 0) {
       const interactions = await PlanInteraction.find({
         plan_id: { $in: planIdsForPreview },
-        status: { $in: ['pending', 'approved'] },
+        status: { $in: ["pending", "approved"] },
       })
         .sort({ created_at: -1 })
-        .select('plan_id user_id')
+        .select("plan_id user_id")
         .lean();
 
       const planToUserIds = new Map();
@@ -254,11 +276,13 @@ exports.getHomeFeed = async (req, res) => {
         arr.push(row.user_id);
       }
 
-      const allPreviewUserIds = [...new Set([].concat(...[...planToUserIds.values()]))];
+      const allPreviewUserIds = [
+        ...new Set([].concat(...[...planToUserIds.values()])),
+      ];
       let userById = new Map();
       if (allPreviewUserIds.length > 0) {
         const users = await User.find({ user_id: { $in: allPreviewUserIds } })
-          .select('user_id name profile_image')
+          .select("user_id name profile_image")
           .lean();
         userById = new Map(users.map((u) => [u.user_id, u]));
       }
@@ -271,7 +295,7 @@ exports.getHomeFeed = async (req, res) => {
           return {
             user_id: uid,
             id: uid,
-            name: u?.name || 'User',
+            name: u?.name || "User",
             profile_image: u?.profile_image || null,
           };
         });
@@ -279,9 +303,9 @@ exports.getHomeFeed = async (req, res) => {
       });
     }
 
-    return sendSuccess(res, 'Feed retrieved successfully', finalFeed);
+    return sendSuccess(res, "Feed retrieved successfully", finalFeed);
   } catch (error) {
-    console.error('Error in getHomeFeed:', error);
+    console.error("Error in getHomeFeed:", error);
     return sendError(res, error.message, 500);
   }
 };
@@ -292,21 +316,21 @@ exports.getHomeFeed = async (req, res) => {
 exports.refreshFeed = async (req, res) => {
   try {
     const { user_id } = req.query;
-    
+
     // Get new posts from last 24 hours
     const yesterday = new Date();
     yesterday.setDate(yesterday.getDate() - 1);
-    
+
     const plans = await BasePlan.find({
-      post_status: 'published',
+      post_status: "published",
       is_live: true,
       is_draft: false,
-      created_at: { $gte: yesterday }
+      created_at: { $gte: yesterday },
     })
       .sort({ created_at: -1 })
       .limit(20);
-    
-    const feed = plans.map(plan => ({
+
+    const feed = plans.map((plan) => ({
       post_id: plan.plan_id,
       user_id: plan.user_id,
       title: plan.title,
@@ -319,10 +343,10 @@ exports.refreshFeed = async (req, res) => {
       location: plan.location_coordinates || plan.location_text,
       is_active: plan.is_live,
       interaction_count: plan.interaction_count,
-      type: plan.type || 'regular' // Include plan type (business or regular)
+      type: plan.type || "regular", // Include plan type (business or regular)
     }));
-    
-    return sendSuccess(res, 'Feed refreshed successfully', feed);
+
+    return sendSuccess(res, "Feed refreshed successfully", feed);
   } catch (error) {
     return sendError(res, error.message, 500);
   }
@@ -336,9 +360,9 @@ exports.getPost = async (req, res) => {
     const { post_id } = req.params;
     const { user_id } = req.query;
     const plan = await BasePlan.findOne({ plan_id: post_id });
-    
+
     if (!plan) {
-      return sendError(res, 'Post not found', 404);
+      return sendError(res, "Post not found", 404);
     }
 
     // Optional block filter (only when caller provides user_id)
@@ -346,23 +370,22 @@ exports.getPost = async (req, res) => {
       const blocks = await UserBlock.find({
         $or: [
           { blocker_id: user_id, blocked_user_id: plan.user_id },
-          { blocker_id: plan.user_id, blocked_user_id: user_id }
-        ]
+          { blocker_id: plan.user_id, blocked_user_id: user_id },
+        ],
       }).lean();
       if (blocks.length > 0) {
-        return sendError(res, 'Post not available', 403);
+        return sendError(res, "Post not available", 403);
       }
     }
-    
+
     // Increment views
     plan.views_count += 1;
     await plan.save();
-    
-    return sendSuccess(res, 'Post retrieved successfully', plan);
+
+    return sendSuccess(res, "Post retrieved successfully", plan);
   } catch (error) {
     return sendError(res, error.message, 500);
   }
 };
 
 module.exports = exports;
-
