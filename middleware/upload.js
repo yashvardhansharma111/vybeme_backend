@@ -42,8 +42,9 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// Same limits and filter for both disk and memory
-const multerLimits = { fileSize: 10 * 1024 * 1024 }; // 10MB max per file
+// Same limits and filter for both disk and memory (keep in sync with postMediaLimits / nginx client_max_body_size)
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const multerLimits = { fileSize: MAX_FILE_BYTES };
 
 // Configure multer (disk storage - for routes that need files on disk)
 const upload = multer({
@@ -66,7 +67,7 @@ const handleMulterError = (err, req, res, next) => {
     if (err.code === 'LIMIT_FILE_SIZE') {
       return res.status(400).json({
         success: false,
-        message: 'File too large. Maximum size is 10MB per file'
+        message: 'File too large. Maximum size is 20MB per file'
       });
     }
     if (err.code === 'LIMIT_FILE_COUNT') {

@@ -40,11 +40,17 @@ function stubPostFromInteractions(planId, interactions) {
  */
 exports.getNotifications = async (req, res) => {
   try {
-    const { user_id, limit = '20', offset = '0' } = req.query;
+    const uid = req.user?.user_id;
+    if (!uid) {
+      return sendError(res, 'Unauthorized', 401);
+    }
+    // Never trust query user_id — omitting it used to match all rows (Mongoose drops undefined keys).
+    const recipientId = String(uid);
+    const { limit = '20', offset = '0' } = req.query;
     const safeLimit = Math.min(50, Math.max(1, parseInt(String(limit), 10) || 20));
     const safeOffset = Math.max(0, parseInt(String(offset), 10) || 0);
 
-    const notifications = await Notification.find({ user_id })
+    const notifications = await Notification.find({ user_id: recipientId })
       .sort({ created_at: -1 })
       .skip(safeOffset)
       .limit(safeLimit)
@@ -229,13 +235,20 @@ exports.getNotifications = async (req, res) => {
  */
 exports.markAsRead = async (req, res) => {
   try {
+    const uid = req.user?.user_id;
+    if (!uid) {
+      return sendError(res, 'Unauthorized', 401);
+    }
     const { notification_id } = req.body;
-    const notification = await Notification.findOne({ notification_id });
-    
+    const notification = await Notification.findOne({
+      notification_id,
+      user_id: String(uid),
+    });
+
     if (!notification) {
       return sendError(res, 'Notification not found', 404);
     }
-    
+
     notification.is_read = true;
     await notification.save();
     
@@ -349,16 +362,17 @@ const BADGE_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
  */
 exports.getUnreadCount = async (req, res) => {
   try {
-    const { user_id, full } = req.query;
-    if (!user_id) {
-      return sendError(res, 'user_id is required', 400);
+    const uid = req.user?.user_id;
+    if (!uid) {
+      return sendError(res, 'Unauthorized', 401);
     }
-    const uid = String(user_id);
+    const { full } = req.query;
+    const recipientId = String(uid);
     const wantFull = full === '1' || full === 'true';
 
     const base = {
-      $or: [{ user_id: uid }, { user_id: user_id }],
-      is_read: false
+      user_id: recipientId,
+      is_read: false,
     };
 
     let filter;
@@ -370,6 +384,18 @@ exports.getUnreadCount = async (req, res) => {
         type: { $nin: BADGE_EXCLUDED_TYPES },
         created_at: { $gte: new Date(Date.now() - BADGE_MAX_AGE_MS) }
       };
+    }
+
+    if (!wantFull) {
+      const u = await User.findOne({ user_id: recipientId }).select('is_business').lean();
+      if (u?.is_business) {
+        filter = {
+          $and: [
+            filter,
+            { $nor: [{ type: 'event_ended', 'payload.cta_type': 'go_to_chat' }] },
+          ],
+        };
+      }
     }
 
     const count = await Notification.countDocuments(filter);
