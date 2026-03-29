@@ -40,17 +40,11 @@ function stubPostFromInteractions(planId, interactions) {
  */
 exports.getNotifications = async (req, res) => {
   try {
-    const uid = req.user?.user_id;
-    if (!uid) {
-      return sendError(res, 'Unauthorized', 401);
-    }
-    // Never trust query user_id — omitting it used to match all rows (Mongoose drops undefined keys).
-    const recipientId = String(uid);
-    const { limit = '20', offset = '0' } = req.query;
+    const { user_id, limit = '20', offset = '0' } = req.query;
     const safeLimit = Math.min(50, Math.max(1, parseInt(String(limit), 10) || 20));
     const safeOffset = Math.max(0, parseInt(String(offset), 10) || 0);
 
-    const notifications = await Notification.find({ user_id: recipientId })
+    const notifications = await Notification.find({ user_id })
       .sort({ created_at: -1 })
       .skip(safeOffset)
       .limit(safeLimit)
@@ -219,20 +213,6 @@ exports.getNotifications = async (req, res) => {
     // Sort by most recent interaction
     result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
-    const rawIds = notifications.map((n) => n.notification_id).filter(Boolean);
-    const uniquePageIds = new Set(rawIds);
-    const interactionTotal = result.reduce((s, g) => s + (g.interactions?.length || 0), 0);
-    console.log('[getNotifications]', {
-      recipientId,
-      page_rows: notifications.length,
-      unique_notification_ids: uniquePageIds.size,
-      duplicate_ids_in_page: rawIds.length > uniquePageIds.size,
-      groups: result.length,
-      interactions_in_groups: interactionTotal,
-      offset: safeOffset,
-      limit: safeLimit,
-    });
-
     return sendSuccess(res, 'Notifications retrieved successfully', {
       groups: result,
       next_offset: safeOffset + notifications.length,
@@ -249,55 +229,17 @@ exports.getNotifications = async (req, res) => {
  */
 exports.markAsRead = async (req, res) => {
   try {
-    const uid = req.user?.user_id;
-    if (!uid) {
-      return sendError(res, 'Unauthorized', 401);
-    }
     const { notification_id } = req.body;
-    const notification = await Notification.findOne({
-      notification_id,
-      user_id: String(uid),
-    });
-
+    const notification = await Notification.findOne({ notification_id });
+    
     if (!notification) {
       return sendError(res, 'Notification not found', 404);
     }
-
+    
     notification.is_read = true;
     await notification.save();
     
     return sendSuccess(res, 'Notification marked as read');
-  } catch (error) {
-    return sendError(res, error.message, 500);
-  }
-};
-
-/**
- * Mark many notifications as read in one DB round-trip (authenticated user only).
- * Body: { notification_ids: string[] } — max 100 ids; only rows owned by the token user are updated.
- */
-exports.markAsReadBulk = async (req, res) => {
-  try {
-    const uid = req.user?.user_id;
-    if (!uid) {
-      return sendError(res, 'Unauthorized', 401);
-    }
-    const { notification_ids } = req.body;
-    if (!Array.isArray(notification_ids) || notification_ids.length === 0) {
-      return sendError(res, 'notification_ids must be a non-empty array', 400);
-    }
-    const ids = [...new Set(notification_ids.map((id) => String(id).trim()).filter(Boolean))].slice(0, 100);
-    if (ids.length === 0) {
-      return sendError(res, 'No valid notification ids', 400);
-    }
-    const result = await Notification.updateMany(
-      { user_id: uid, notification_id: { $in: ids }, is_read: false },
-      { $set: { is_read: true } }
-    );
-    return sendSuccess(res, 'Notifications marked as read', {
-      modified_count: result.modifiedCount ?? result.nModified ?? 0,
-      matched_count: result.matchedCount ?? 0,
-    });
   } catch (error) {
     return sendError(res, error.message, 500);
   }
@@ -309,43 +251,9 @@ exports.markAsReadBulk = async (req, res) => {
  * @param {string} type - Notification type (e.g. post_live, event_ended, registration_successful)
  * @param {object} opts - { source_plan_id?, source_user_id (default 'system'), payload }
  */
-const DEDUPE_TYPES = new Set([
-  'post_live',
-  'event_ended',
-  'event_ended_registered',
-  'event_ended_attended',
-  'free_event_cancelled',
-  'paid_event_cancelled',
-  'registration_successful',
-  'plan_shared_chat',
-]);
-
 exports.createGeneralNotification = async (user_id, type, opts = {}) => {
-  const { source_plan_id = null, source_user_id = 'system', payload = {}, dedupeWindowMs } = opts;
+  const { source_plan_id = null, source_user_id = 'system', payload = {} } = opts;
   try {
-    let windowMs = dedupeWindowMs;
-    if (windowMs == null) {
-      if (type === 'post_live') windowMs = 2 * 60 * 1000;
-      else if (type === 'event_ended' || String(type).startsWith('event_ended')) windowMs = 72 * 3600 * 1000;
-      else windowMs = 24 * 3600 * 1000;
-    }
-
-    if (source_plan_id && DEDUPE_TYPES.has(type)) {
-      const since = new Date(Date.now() - windowMs);
-      const dup = await Notification.findOne({
-        user_id,
-        type,
-        source_plan_id,
-        created_at: { $gte: since },
-      })
-        .select('notification_id')
-        .lean();
-      if (dup) {
-        console.log('[createGeneralNotification] skip duplicate type=', type, 'user_id=', user_id, 'plan_id=', source_plan_id);
-        return;
-      }
-    }
-
     await Notification.create({
       notification_id: generateId('notification'),
       user_id,
@@ -362,129 +270,22 @@ exports.createGeneralNotification = async (user_id, type, opts = {}) => {
 };
 
 /**
- * Types that duplicate the same "event ended" moment for organizers (tab badge should not triple-count).
- * The primary row users care about is usually `event_ended`.
- */
-const BADGE_EXCLUDED_TYPES = ['event_ended_registered', 'event_ended_attended'];
-
-/**
- * Tab badge only counts types the app actually shows in Notifications (cards + list).
- * Excludes "ghost" unread rows (legacy/unknown types) so the pill matches on-screen activity.
- */
-const BADGE_VISIBLE_TYPES = [
-  'comment',
-  'reaction',
-  'join',
-  'repost',
-  'post_live',
-  'event_ended',
-  'free_event_cancelled',
-  'paid_event_cancelled',
-  'event_chat_poll_vote',
-  'registration_successful',
-  'plan_shared_chat',
-];
-
-/**
- * Social / engagement rows — shown on plan cards + summary stack, not in the time-grouped list.
- * For business users, tab badge counts list + system rows only so the pill matches the “general”
- * section and does not double-count engagement that already has card/summary UI.
- */
-const BADGE_SOCIAL_TYPES = ['comment', 'reaction', 'join', 'repost'];
-
-const BADGE_BUSINESS_TAB_TYPES = BADGE_VISIBLE_TYPES.filter((t) => !BADGE_SOCIAL_TYPES.includes(t));
-
-/** Ignore ancient unread rows for the tab badge only (full=1 still counts everything). */
-const BADGE_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
-
-/**
- * Get unread count for tab badge (default) or full DB count (full=1).
- * Default: visible notification types only + age window + business chat-row exclusion.
+ * Get unread count
  */
 exports.getUnreadCount = async (req, res) => {
   try {
-    const uid = req.user?.user_id;
-    if (!uid) {
-      return sendError(res, 'Unauthorized', 401);
+    const { user_id } = req.query;
+    if (!user_id) {
+      return sendError(res, 'user_id is required', 400);
     }
-    const { full } = req.query;
-    const recipientId = String(uid);
-    const wantFull = full === '1' || full === 'true';
-
-    const base = {
-      user_id: recipientId,
-      is_read: false,
-    };
-
-    let filter;
-    let tabBadgeUser = null;
-    if (wantFull) {
-      filter = base;
-    } else {
-      tabBadgeUser = await User.findOne({ user_id: recipientId }).select('is_business').lean();
-      const tabTypes = tabBadgeUser?.is_business ? BADGE_BUSINESS_TAB_TYPES : BADGE_VISIBLE_TYPES;
-
-      filter = {
-        ...base,
-        type: { $in: tabTypes },
-        created_at: { $gte: new Date(Date.now() - BADGE_MAX_AGE_MS) },
-      };
-
-      if (tabBadgeUser?.is_business) {
-        filter = {
-          $and: [
-            filter,
-            { $nor: [{ type: 'event_ended', 'payload.cta_type': 'go_to_chat' }] },
-          ],
-        };
-      }
-    }
-
-    const count = await Notification.countDocuments(filter);
-
-    if (!wantFull) {
-      const ageCut = new Date(Date.now() - BADGE_MAX_AGE_MS);
-      const stray = await Notification.countDocuments({
-        user_id: recipientId,
-        is_read: false,
-        type: { $nin: BADGE_VISIBLE_TYPES },
-        created_at: { $gte: ageCut },
-      });
-      let unreadSocialBusiness = null;
-      if (tabBadgeUser?.is_business) {
-        unreadSocialBusiness = await Notification.countDocuments({
-          user_id: recipientId,
-          is_read: false,
-          type: { $in: BADGE_SOCIAL_TYPES },
-          created_at: { $gte: ageCut },
-        });
-      }
-      console.log('[getUnreadCount:tab]', {
-        recipientId,
-        is_business: Boolean(tabBadgeUser?.is_business),
-        unread_tab_badge: count,
-        unread_not_shown_in_app: stray,
-        ...(tabBadgeUser?.is_business
-          ? {
-              unread_social_only_cards: unreadSocialBusiness,
-              tab_counts_types: 'business_list_system_excludes_social',
-            }
-          : { tab_counts_types: 'all_visible_including_social' }),
-        badge_visible_types: BADGE_VISIBLE_TYPES.length,
-        excludes_duplicate_ended_types: BADGE_EXCLUDED_TYPES,
-      });
-    } else {
-      console.log('[getUnreadCount:full]', { recipientId, unread_total: count });
-    }
-
+    const uid = String(user_id);
+    const count = await Notification.countDocuments({
+      $or: [{ user_id: uid }, { user_id: user_id }],
+      is_read: false
+    });
+    
     return sendSuccess(res, 'Unread count retrieved successfully', {
-      unread_count: count,
-      ...(wantFull
-        ? {}
-        : {
-            badge_mode: tabBadgeUser?.is_business ? 'tab_business_list_system' : 'tab_visible_types',
-            badge_max_age_days: Math.round(BADGE_MAX_AGE_MS / (24 * 60 * 60 * 1000)),
-          }),
+      unread_count: count
     });
   } catch (error) {
     return sendError(res, error.message, 500);
