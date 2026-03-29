@@ -385,6 +385,15 @@ const BADGE_VISIBLE_TYPES = [
   'plan_shared_chat',
 ];
 
+/**
+ * Social / engagement rows — shown on plan cards + summary stack, not in the time-grouped list.
+ * For business users, tab badge counts list + system rows only so the pill matches the “general”
+ * section and does not double-count engagement that already has card/summary UI.
+ */
+const BADGE_SOCIAL_TYPES = ['comment', 'reaction', 'join', 'repost'];
+
+const BADGE_BUSINESS_TAB_TYPES = BADGE_VISIBLE_TYPES.filter((t) => !BADGE_SOCIAL_TYPES.includes(t));
+
 /** Ignore ancient unread rows for the tab badge only (full=1 still counts everything). */
 const BADGE_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 
@@ -408,19 +417,20 @@ exports.getUnreadCount = async (req, res) => {
     };
 
     let filter;
+    let tabBadgeUser = null;
     if (wantFull) {
       filter = base;
     } else {
+      tabBadgeUser = await User.findOne({ user_id: recipientId }).select('is_business').lean();
+      const tabTypes = tabBadgeUser?.is_business ? BADGE_BUSINESS_TAB_TYPES : BADGE_VISIBLE_TYPES;
+
       filter = {
         ...base,
-        type: { $in: BADGE_VISIBLE_TYPES },
+        type: { $in: tabTypes },
         created_at: { $gte: new Date(Date.now() - BADGE_MAX_AGE_MS) },
       };
-    }
 
-    if (!wantFull) {
-      const u = await User.findOne({ user_id: recipientId }).select('is_business').lean();
-      if (u?.is_business) {
+      if (tabBadgeUser?.is_business) {
         filter = {
           $and: [
             filter,
@@ -433,16 +443,33 @@ exports.getUnreadCount = async (req, res) => {
     const count = await Notification.countDocuments(filter);
 
     if (!wantFull) {
+      const ageCut = new Date(Date.now() - BADGE_MAX_AGE_MS);
       const stray = await Notification.countDocuments({
         user_id: recipientId,
         is_read: false,
         type: { $nin: BADGE_VISIBLE_TYPES },
-        created_at: { $gte: new Date(Date.now() - BADGE_MAX_AGE_MS) },
+        created_at: { $gte: ageCut },
       });
+      let unreadSocialBusiness = null;
+      if (tabBadgeUser?.is_business) {
+        unreadSocialBusiness = await Notification.countDocuments({
+          user_id: recipientId,
+          is_read: false,
+          type: { $in: BADGE_SOCIAL_TYPES },
+          created_at: { $gte: ageCut },
+        });
+      }
       console.log('[getUnreadCount:tab]', {
         recipientId,
+        is_business: Boolean(tabBadgeUser?.is_business),
         unread_tab_badge: count,
         unread_not_shown_in_app: stray,
+        ...(tabBadgeUser?.is_business
+          ? {
+              unread_social_only_cards: unreadSocialBusiness,
+              tab_counts_types: 'business_list_system_excludes_social',
+            }
+          : { tab_counts_types: 'all_visible_including_social' }),
         badge_visible_types: BADGE_VISIBLE_TYPES.length,
         excludes_duplicate_ended_types: BADGE_EXCLUDED_TYPES,
       });
@@ -455,7 +482,7 @@ exports.getUnreadCount = async (req, res) => {
       ...(wantFull
         ? {}
         : {
-            badge_mode: 'tab_visible_types',
+            badge_mode: tabBadgeUser?.is_business ? 'tab_business_list_system' : 'tab_visible_types',
             badge_max_age_days: Math.round(BADGE_MAX_AGE_MS / (24 * 60 * 60 * 1000)),
           }),
     });
