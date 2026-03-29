@@ -219,6 +219,20 @@ exports.getNotifications = async (req, res) => {
     // Sort by most recent interaction
     result.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
+    const rawIds = notifications.map((n) => n.notification_id).filter(Boolean);
+    const uniquePageIds = new Set(rawIds);
+    const interactionTotal = result.reduce((s, g) => s + (g.interactions?.length || 0), 0);
+    console.log('[getNotifications]', {
+      recipientId,
+      page_rows: notifications.length,
+      unique_notification_ids: uniquePageIds.size,
+      duplicate_ids_in_page: rawIds.length > uniquePageIds.size,
+      groups: result.length,
+      interactions_in_groups: interactionTotal,
+      offset: safeOffset,
+      limit: safeLimit,
+    });
+
     return sendSuccess(res, 'Notifications retrieved successfully', {
       groups: result,
       next_offset: safeOffset + notifications.length,
@@ -353,12 +367,30 @@ exports.createGeneralNotification = async (user_id, type, opts = {}) => {
  */
 const BADGE_EXCLUDED_TYPES = ['event_ended_registered', 'event_ended_attended'];
 
+/**
+ * Tab badge only counts types the app actually shows in Notifications (cards + list).
+ * Excludes "ghost" unread rows (legacy/unknown types) so the pill matches on-screen activity.
+ */
+const BADGE_VISIBLE_TYPES = [
+  'comment',
+  'reaction',
+  'join',
+  'repost',
+  'post_live',
+  'event_ended',
+  'free_event_cancelled',
+  'paid_event_cancelled',
+  'event_chat_poll_vote',
+  'registration_successful',
+  'plan_shared_chat',
+];
+
 /** Ignore ancient unread rows for the tab badge only (full=1 still counts everything). */
 const BADGE_MAX_AGE_MS = 180 * 24 * 60 * 60 * 1000;
 
 /**
  * Get unread count for tab badge (default) or full DB count (full=1).
- * Default matches navbar: excludes organizer analytics duplicates + very old unreads.
+ * Default: visible notification types only + age window + business chat-row exclusion.
  */
 exports.getUnreadCount = async (req, res) => {
   try {
@@ -381,8 +413,8 @@ exports.getUnreadCount = async (req, res) => {
     } else {
       filter = {
         ...base,
-        type: { $nin: BADGE_EXCLUDED_TYPES },
-        created_at: { $gte: new Date(Date.now() - BADGE_MAX_AGE_MS) }
+        type: { $in: BADGE_VISIBLE_TYPES },
+        created_at: { $gte: new Date(Date.now() - BADGE_MAX_AGE_MS) },
       };
     }
 
@@ -400,9 +432,32 @@ exports.getUnreadCount = async (req, res) => {
 
     const count = await Notification.countDocuments(filter);
 
+    if (!wantFull) {
+      const stray = await Notification.countDocuments({
+        user_id: recipientId,
+        is_read: false,
+        type: { $nin: BADGE_VISIBLE_TYPES },
+        created_at: { $gte: new Date(Date.now() - BADGE_MAX_AGE_MS) },
+      });
+      console.log('[getUnreadCount:tab]', {
+        recipientId,
+        unread_tab_badge: count,
+        unread_not_shown_in_app: stray,
+        badge_visible_types: BADGE_VISIBLE_TYPES.length,
+        excludes_duplicate_ended_types: BADGE_EXCLUDED_TYPES,
+      });
+    } else {
+      console.log('[getUnreadCount:full]', { recipientId, unread_total: count });
+    }
+
     return sendSuccess(res, 'Unread count retrieved successfully', {
       unread_count: count,
-      ...(wantFull ? {} : { badge_mode: 'tab', badge_excludes: BADGE_EXCLUDED_TYPES })
+      ...(wantFull
+        ? {}
+        : {
+            badge_mode: 'tab_visible_types',
+            badge_max_age_days: Math.round(BADGE_MAX_AGE_MS / (24 * 60 * 60 * 1000)),
+          }),
     });
   } catch (error) {
     return sendError(res, error.message, 500);
