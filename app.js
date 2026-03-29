@@ -82,8 +82,10 @@ const razorpayWebhookHandler = (req, res) => {
 };
 app.post('/api/webhooks/razorpay', express.raw({ type: 'application/json' }), razorpayWebhookHandler);
 app.post('/api/razorpay/webhook', express.raw({ type: 'application/json' }), razorpayWebhookHandler);
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// Allow larger request bodies so app metadata and non-multipart payloads stay aligned
+// with the upload product rule (20MB per file, up to ~100MB total request size).
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
 // Note: CORS middleware automatically handles OPTIONS preflight requests
 
@@ -171,4 +173,3 @@ server.listen(PORT, () => {
 });
 
 module.exports = { app, server, io };
-

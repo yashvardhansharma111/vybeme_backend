@@ -42,9 +42,15 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// Same limits and filter for both disk and memory (keep in sync with postMediaLimits / nginx client_max_body_size)
+// Keep in sync with app validation and deployed proxy limits.
+// Product rule: up to 20MB per file, with uploads expected to work up to ~100MB total request size.
 const MAX_FILE_BYTES = 20 * 1024 * 1024;
-const multerLimits = { fileSize: MAX_FILE_BYTES };
+const MAX_TOTAL_REQUEST_BYTES = 100 * 1024 * 1024;
+const multerLimits = {
+  fileSize: MAX_FILE_BYTES,
+  files: 10,
+  fieldSize: 10 * 1024 * 1024,
+};
 
 // Configure multer (disk storage - for routes that need files on disk)
 const upload = multer({
@@ -194,6 +200,8 @@ module.exports = {
   uploadMultipleMemory,
   uploadFields,
   uploadFieldsMemory,
-  cleanupFile
+  cleanupFile,
+  MAX_FILE_BYTES,
+  MAX_TOTAL_REQUEST_BYTES,
 };
 

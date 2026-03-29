@@ -6,11 +6,11 @@ const { uploadFieldsMemory } = require('../middleware/upload');
 
 // Handle both post media (files) and ticket image (ticket_image) - memory storage for speed
 router.post('/create', authenticate, uploadFieldsMemory([
-  { name: 'files', maxCount: 10 },
+  { name: 'files', maxCount: 5 },
   { name: 'ticket_image', maxCount: 1 }
 ]), businessPostController.createBusinessPost);
 router.put('/update/:post_id', authenticate, uploadFieldsMemory([
-  { name: 'files', maxCount: 10 },
+  { name: 'files', maxCount: 5 },
   { name: 'ticket_image', maxCount: 1 }
 ]), businessPostController.updateBusinessPost);
 router.get('/details/:post_id', businessPostController.getBusinessPostDetails);
