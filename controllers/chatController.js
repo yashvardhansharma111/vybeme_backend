@@ -1080,25 +1080,51 @@ exports.getUnreadCounter = async (req, res) => {
     if (!user_id) {
       return sendError(res, 'user_id is required', 400);
     }
+
+    let blockedUserIds = new Set();
+    const blocks = await UserBlock.find({
+      $or: [{ blocker_id: user_id }, { blocked_user_id: user_id }]
+    }).lean();
+    blocks.forEach((b) => {
+      if (String(b.blocker_id) === String(user_id)) blockedUserIds.add(String(b.blocked_user_id));
+      if (String(b.blocked_user_id) === String(user_id)) blockedUserIds.add(String(b.blocker_id));
+    });
+
     const userGroups = await ChatGroup.find({
       $expr: { $in: [String(user_id), { $map: { input: '$members', as: 'm', in: { $toString: '$$m' } } }] },
       is_closed: false
     }).lean();
+
     const planIds = [...new Set(userGroups.map((g) => g.plan_id).filter(Boolean))];
-    const businessPlanIds = new Set(
-      planIds.length
-        ? (await BasePlan.find({ plan_id: { $in: planIds }, type: 'business' }).select('plan_id').lean()).map(
-            (p) => p.plan_id
-          )
-        : []
-    );
+    const plans = planIds.length
+      ? await BasePlan.find({
+          plan_id: { $in: planIds },
+          deleted_at: null,
+          post_status: { $ne: 'deleted' },
+        })
+          .select('plan_id user_id type plan_type group_id')
+          .lean()
+      : [];
+    const planMap = new Map(plans.map((p) => [String(p.plan_id), p]));
+
     let unread_chats_count = 0;
     for (const group of userGroups) {
-      // Match getChatLists: 1-member business event groups are not listed — don't count toward tab badge.
+      const plan = planMap.get(String(group.plan_id));
+      if (!plan) continue;
+
       const memberCount = (group.members && group.members.length) || 0;
-      if (businessPlanIds.has(group.plan_id) && memberCount < 2) {
-        continue;
+
+      if (group.members.length === 2) {
+        const otherUserId = group.members.find((id) => id !== user_id);
+        if (otherUserId && blockedUserIds.has(String(otherUserId))) continue;
       }
+
+      const isEventGroupThread =
+        (plan.group_id && String(plan.group_id) === String(group.group_id)) ||
+        plan.type === 'business' ||
+        plan.plan_type === 'BusinessPlan';
+      if (isEventGroupThread && memberCount < 2) continue;
+
       const lastReadAt = group.last_read_at && (group.last_read_at[String(user_id)] || group.last_read_at[user_id]);
       const lastReadDate = lastReadAt ? new Date(lastReadAt) : new Date(0);
       const count = await ChatMessage.countDocuments({

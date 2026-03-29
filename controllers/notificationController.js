@@ -251,9 +251,43 @@ exports.markAsRead = async (req, res) => {
  * @param {string} type - Notification type (e.g. post_live, event_ended, registration_successful)
  * @param {object} opts - { source_plan_id?, source_user_id (default 'system'), payload }
  */
+const DEDUPE_TYPES = new Set([
+  'post_live',
+  'event_ended',
+  'event_ended_registered',
+  'event_ended_attended',
+  'free_event_cancelled',
+  'paid_event_cancelled',
+  'registration_successful',
+  'plan_shared_chat',
+]);
+
 exports.createGeneralNotification = async (user_id, type, opts = {}) => {
-  const { source_plan_id = null, source_user_id = 'system', payload = {} } = opts;
+  const { source_plan_id = null, source_user_id = 'system', payload = {}, dedupeWindowMs } = opts;
   try {
+    let windowMs = dedupeWindowMs;
+    if (windowMs == null) {
+      if (type === 'post_live') windowMs = 2 * 60 * 1000;
+      else if (type === 'event_ended' || String(type).startsWith('event_ended')) windowMs = 72 * 3600 * 1000;
+      else windowMs = 24 * 3600 * 1000;
+    }
+
+    if (source_plan_id && DEDUPE_TYPES.has(type)) {
+      const since = new Date(Date.now() - windowMs);
+      const dup = await Notification.findOne({
+        user_id,
+        type,
+        source_plan_id,
+        created_at: { $gte: since },
+      })
+        .select('notification_id')
+        .lean();
+      if (dup) {
+        console.log('[createGeneralNotification] skip duplicate type=', type, 'user_id=', user_id, 'plan_id=', source_plan_id);
+        return;
+      }
+    }
+
     await Notification.create({
       notification_id: generateId('notification'),
       user_id,

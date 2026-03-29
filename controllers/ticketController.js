@@ -7,6 +7,7 @@ const {
   postMemberAddedSystemMessage,
 } = require('../services/chatGroupMemberNotifications');
 const { sendEventRegistrationWhatsApp } = require('../utils/whatsappCloudApi');
+const { getEventEndDateForDeactivation } = require('../utils/eventSchedule');
 
 /**
  * Generate human-readable ticket number: OwnerFirstName01, OwnerFirstName02, …
@@ -136,6 +137,21 @@ exports.registerForEvent = async (req, res) => {
     
     if (plan.type !== 'business') {
       return sendError(res, 'This endpoint is only for business plans', 400);
+    }
+
+    // Self-heal: job may have marked completed early; reopen if event end (IST) is still in the future.
+    const eventEnd = getEventEndDateForDeactivation(plan.date, plan.time, plan.end_time);
+    const wronglyClosed =
+      (plan.post_status === 'completed' || plan.post_status === 'expired') &&
+      eventEnd &&
+      eventEnd.getTime() > Date.now();
+    if (wronglyClosed) {
+      await BusinessPlan.updateOne(
+        { plan_id: plan.plan_id },
+        { $set: { post_status: 'published', is_live: true, updated_at: new Date() } }
+      );
+      plan.post_status = 'published';
+      plan.is_live = true;
     }
 
     if (plan.post_status === 'completed' || plan.post_status === 'expired') {

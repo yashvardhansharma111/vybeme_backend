@@ -6,33 +6,12 @@
 
 const { BusinessPlan, Registration } = require('../models');
 const { createGeneralNotification } = require('../controllers/notificationController');
+const { getEventEndDateForDeactivation, getEventStartDate } = require('../utils/eventSchedule');
 
 const INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
 /**
- * Parse a time string (e.g. "12:00 PM") and combine with a date to get event start Date.
- * @param {Date} date - Plan date
- * @param {string} timeStr - Time string like "12:00 PM"
- * @returns {Date|null} Event start datetime or null if invalid
- */
-function getEventStartDate(date, timeStr) {
-  if (!date || !timeStr || typeof timeStr !== 'string') return null;
-  const d = new Date(date);
-  if (isNaN(d.getTime())) return null;
-  const match = timeStr.trim().match(/(\d+):(\d+)\s*(AM|PM)/i);
-  if (!match) return null;
-  let hours = parseInt(match[1], 10);
-  const minutes = Math.min(59, Math.max(0, parseInt(match[2], 10)));
-  const ampm = match[3].toUpperCase();
-  if (ampm === 'PM' && hours !== 12) hours += 12;
-  if (ampm === 'AM' && hours === 12) hours = 0;
-  hours = Math.min(23, Math.max(0, hours));
-  d.setHours(hours, minutes, 0, 0);
-  return d;
-}
-
-/**
- * Find published business plans whose event start (date + time) is in the past
+ * Find published business plans whose event end (end_time, or end of event day IST) is in the past
  * and set post_status to 'completed'.
  */
 async function deactivatePastEventPlans() {
@@ -46,9 +25,9 @@ async function deactivatePastEventPlans() {
 
     let deactivated = 0;
     for (const plan of plans) {
-      const eventStart = getEventStartDate(plan.date, plan.time);
-      if (!eventStart) continue;
-      if (eventStart.getTime() <= now.getTime()) {
+      const eventEnd = getEventEndDateForDeactivation(plan.date, plan.time, plan.end_time);
+      if (!eventEnd) continue;
+      if (eventEnd.getTime() <= now.getTime()) {
         const plan_id = plan.plan_id;
         const ownerId = plan.user_id;
         const eventTitle = plan.title || 'Event';
@@ -134,7 +113,7 @@ async function deactivatePastEventPlans() {
       }
     }
     if (deactivated > 0) {
-      console.log(`[deactivatePastEventPlans] Marked ${deactivated} plan(s) completed (event start time had passed).`);
+      console.log(`[deactivatePastEventPlans] Marked ${deactivated} plan(s) completed (event end had passed, IST).`);
     }
   } catch (err) {
     console.error('[deactivatePastEventPlans] Error:', err.message);
