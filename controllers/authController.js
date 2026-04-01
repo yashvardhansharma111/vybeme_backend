@@ -7,7 +7,7 @@ const { sendOTP: sendRenflairSMS } = require('../utils/renflairSms');
 const OTP_TTL_SECONDS = 600; // 10 minutes
 const MAX_OTP_ATTEMPTS = 5;
 const DEV_OTP = '0000'; // Demo OTP (no SMS)
-const DEMO_PHONE = '+919999999999'; // Dummy number: OTP 0000, no SMS
+const DEMO_PHONE = '+919589708682'; // Dummy number: OTP 0000, no SMS
 
 /**
  * Send OTP: demo number gets 0000 (no SMS); all others get random 4-digit OTP via Renflair.
